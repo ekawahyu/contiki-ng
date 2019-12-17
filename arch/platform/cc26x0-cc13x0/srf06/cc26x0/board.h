@@ -240,7 +240,7 @@
  * \name Device string used on startup
  * @{
  */
-#define BOARD_STRING "TI SmartRF06EB + CC26xx EM"
+#define BOARD_STRING "TI SmartRF06EB + CC26x0EM-7ID"
 /** @} */
 /*---------------------------------------------------------------------------*/
 #endif /* BOARD_H_ */
