@@ -76,10 +76,10 @@
  * Those values are not meant to be modified by the user
  * @{
  */
-#define BOARD_IOID_LED_1          IOID_25
-#define BOARD_IOID_LED_2          IOID_27
-#define BOARD_IOID_LED_3          IOID_7
-#define BOARD_IOID_LED_4          IOID_6
+#define BOARD_IOID_LED_1          IOID_2
+#define BOARD_IOID_LED_2          IOID_3
+#define BOARD_IOID_LED_3          IOID_2
+#define BOARD_IOID_LED_4          IOID_3
 /** @} */
 /*---------------------------------------------------------------------------*/
 /**
@@ -88,8 +88,8 @@
  * Those values are not meant to be modified by the user
  * @{
  */
-#define BOARD_IOID_UART_RX        IOID_2
-#define BOARD_IOID_UART_TX        IOID_3
+#define BOARD_IOID_UART_RX        IOID_1
+#define BOARD_IOID_UART_TX        IOID_0
 #define BOARD_IOID_UART_CTS       IOID_UNUSED
 #define BOARD_IOID_UART_RTS       IOID_UNUSED
 #define BOARD_UART_RX             (1 << BOARD_IOID_UART_RX)
@@ -104,11 +104,11 @@
  * Those values are not meant to be modified by the user
  * @{
  */
-#define BOARD_IOID_KEY_LEFT       IOID_15
-#define BOARD_IOID_KEY_RIGHT      IOID_18
-#define BOARD_IOID_KEY_UP         IOID_19
-#define BOARD_IOID_KEY_DOWN       IOID_12
-#define BOARD_IOID_KEY_SELECT     IOID_11
+#define BOARD_IOID_KEY_LEFT       IOID_5
+#define BOARD_IOID_KEY_RIGHT      IOID_13
+#define BOARD_IOID_KEY_UP         IOID_6
+#define BOARD_IOID_KEY_DOWN       IOID_4
+#define BOARD_IOID_KEY_SELECT     IOID_9
 #define BOARD_KEY_LEFT            (1 << BOARD_IOID_KEY_LEFT)
 #define BOARD_KEY_RIGHT           (1 << BOARD_IOID_KEY_RIGHT)
 #define BOARD_KEY_UP              (1 << BOARD_IOID_KEY_UP)
@@ -122,7 +122,7 @@
  * Those values are not meant to be modified by the user
  * @{
  */
-#define BOARD_IOID_3V3_EN         IOID_13
+#define BOARD_IOID_3V3_EN         IOID_14
 #define BOARD_3V3_EN              (1 << BOARD_IOID_3V3_EN)
 /** @} */
 /*---------------------------------------------------------------------------*/
@@ -133,8 +133,8 @@
  * @{
  */
 #define BOARD_IOID_SPI_SCK        IOID_10
-#define BOARD_IOID_SPI_MOSI       IOID_9
-#define BOARD_IOID_SPI_MISO       IOID_8
+#define BOARD_IOID_SPI_MOSI       IOID_11
+#define BOARD_IOID_SPI_MISO       IOID_12
 #define BOARD_SPI_SCK             (1 << BOARD_IOID_SPI_SCK)
 #define BOARD_SPI_MOSI            (1 << BOARD_IOID_SPI_MOSI)
 #define BOARD_SPI_MISO            (1 << BOARD_IOID_SPI_MISO)
@@ -146,9 +146,9 @@
  * Those values are not meant to be modified by the user
  * @{
  */
-#define BOARD_IOID_LCD_MODE       IOID_4
-#define BOARD_IOID_LCD_RST        IOID_5
-#define BOARD_IOID_LCD_CS         IOID_14
+#define BOARD_IOID_LCD_MODE       IOID_7
+#define BOARD_IOID_LCD_RST        IOID_7
+#define BOARD_IOID_LCD_CS         IOID_8
 #define BOARD_IOID_LCD_SCK        BOARD_IOID_SPI_SCK
 #define BOARD_IOID_LCD_MOSI       BOARD_IOID_SPI_MOSI
 #define BOARD_LCD_MODE            (1 << BOARD_IOID_LCD_MODE)
@@ -240,7 +240,7 @@
  * \name Device string used on startup
  * @{
  */
-#define BOARD_STRING "TI SmartRF06EB + CC26x0EM-7ID"
+#define BOARD_STRING "TI SmartRF06EB + CC26x0EM-5XD"
 /** @} */
 /*---------------------------------------------------------------------------*/
 #endif /* BOARD_H_ */
