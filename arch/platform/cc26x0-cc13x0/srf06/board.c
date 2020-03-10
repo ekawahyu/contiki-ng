@@ -70,7 +70,7 @@ wakeup_handler(void)
  * getting notified before deep sleep. All we need is to be notified when we
  * wake up so we can turn power domains back on
  */
-LPM_MODULE(srf_module, NULL, lpm_handler, wakeup_handler, LPM_DOMAIN_NONE);
+LPM_MODULE(srf_module, NULL, lpm_handler, wakeup_handler, LPM_DOMAIN_NONE, "board");
 /*---------------------------------------------------------------------------*/
 static void
 configure_unused_pins(void)

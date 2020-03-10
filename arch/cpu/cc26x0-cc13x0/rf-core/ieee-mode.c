@@ -695,7 +695,7 @@ request(void)
   return LPM_MODE_MAX_SUPPORTED;
 }
 /*---------------------------------------------------------------------------*/
-LPM_MODULE(cc26xx_rf_lpm_module, request, NULL, NULL, LPM_DOMAIN_NONE);
+LPM_MODULE(cc26xx_rf_lpm_module, request, NULL, NULL, LPM_DOMAIN_NONE, "ieee");
 /*---------------------------------------------------------------------------*/
 static void
 soft_off(void)

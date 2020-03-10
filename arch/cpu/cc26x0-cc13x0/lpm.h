@@ -66,6 +66,7 @@ typedef struct lpm_registered_module {
   void (*shutdown)(uint8_t mode);
   void (*wakeup)(void);
   uint32_t domain_lock;
+  char *name;
 } lpm_registered_module_t;
 /*---------------------------------------------------------------------------*/
 /**
@@ -89,8 +90,8 @@ typedef struct lpm_registered_module {
  *          to deep sleep. This field can be a bitwise OR of LPM_DOMAIN_x, so
  *          if required multiple domains can be kept powered.
  */
-#define LPM_MODULE(n, m, s, w, l) static lpm_registered_module_t n = \
-  { NULL, m, s, w, l }
+#define LPM_MODULE(n, m, s, w, l, name) static lpm_registered_module_t n = \
+  { NULL, m, s, w, l, name }
 /*---------------------------------------------------------------------------*/
 /**
  * \brief Drop the cortex to sleep / deep sleep and shut down peripherals

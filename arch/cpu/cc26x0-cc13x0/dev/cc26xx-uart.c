@@ -244,7 +244,7 @@ lpm_drop_handler(uint8_t mode)
 }
 /*---------------------------------------------------------------------------*/
 /* Declare a data structure to register with LPM. */
-LPM_MODULE(uart_module, NULL, lpm_drop_handler, NULL, LPM_DOMAIN_NONE);
+LPM_MODULE(uart_module, NULL, lpm_drop_handler, NULL, LPM_DOMAIN_NONE, "uart");
 /*---------------------------------------------------------------------------*/
 static void
 enable(void)

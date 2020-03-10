@@ -90,7 +90,7 @@ void board_init(void);
 #define BOARD_HAS_SENSORS 1
 #endif
 /*---------------------------------------------------------------------------*/
-static void
+void
 fade(leds_mask_t l)
 {
   volatile int i;

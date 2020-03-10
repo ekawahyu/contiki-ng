@@ -99,7 +99,7 @@ request(void)
   return LPM_MODE_MAX_SUPPORTED;
 }
 /*---------------------------------------------------------------------------*/
-LPM_MODULE(cc26xx_ble_lpm_module, request, NULL, NULL, LPM_DOMAIN_NONE);
+LPM_MODULE(cc26xx_ble_lpm_module, request, NULL, NULL, LPM_DOMAIN_NONE, "ble");
 /*---------------------------------------------------------------------------*/
 /* timing utilities                                */
 #define TIME_UNIT_MS          1000    /* 1000 times per second */
