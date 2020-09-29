@@ -89,6 +89,7 @@ lpm_shutdown(uint32_t wakeup_pin, uint32_t io_pull, uint32_t wake_on)
   uint32_t io_cfg = (IOC_STD_INPUT & ~IOC_IOPULL_M) | io_pull | wake_on;
   aux_consumer_module_t aux = { .clocks = AUX_WUC_OSCCTRL_CLOCK };
 
+  printf("LPM SHUTDOWN:::\n");
   /* This procedure may not be interrupted */
   ti_lib_int_master_disable();
 
@@ -194,6 +195,7 @@ wake_up(void)
 
   ENERGEST_SWITCH(ENERGEST_TYPE_DEEP_LPM, ENERGEST_TYPE_CPU);
 
+  printf("LPM WAKEUP:::\n");
   /* Sync so that we get the latest values before adjusting recharge settings */
   ti_lib_sys_ctrl_aon_sync();
 
@@ -434,6 +436,7 @@ deep_sleep(void)
    * Freeze the IOs on the boundary between MCU and AON. We only do this if
    * PERIPH is not needed
    */
+  fade(LEDS_ORANGE);
   if(domains & PRCM_DOMAIN_PERIPH) {
     ti_lib_aon_ioc_freeze_enable();
   }
@@ -513,6 +516,9 @@ deep_sleep(void)
   /* Deep Sleep */
   ti_lib_prcm_deep_sleep();
 
+  /* Standby/Shutdown test */
+  ti_lib_sys_ctrl_shutdown();
+
   /*
    * When we reach here, some interrupt woke us up. The global interrupt
    * flag is off, hence we have a chance to run things here. We will wake up
@@ -520,6 +526,7 @@ deep_sleep(void)
    * unpending events so the handlers can fire
    */
   wake_up();
+  fade(LEDS_GREEN);
 
   ti_lib_int_master_enable();
 }
@@ -529,6 +536,7 @@ lpm_drop()
 {
   uint8_t max_pm;
 
+  printf("LPM DROP:::\n");
   /* Critical. Don't get interrupted! */
   ti_lib_int_master_disable();
 
@@ -536,10 +544,10 @@ lpm_drop()
 
   /* Drop */
   if(max_pm == LPM_MODE_SLEEP) {
-    fade(LEDS_GREEN);
+    printf("LPM DROP:::SLEEP\n");
     lpm_sleep();
   } else if(max_pm == LPM_MODE_DEEP_SLEEP) {
-    fade(LEDS_ORANGE);
+    printf("LPM DROP:::DEEPSLEEP\n");
     deep_sleep();
   }
 

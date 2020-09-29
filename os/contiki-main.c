@@ -81,7 +81,7 @@ main(void)
   process_init();
   process_start(&etimer_process, NULL);
   ctimer_init();
-  watchdog_init();
+  //watchdog_init();
 
   energest_init();
 
@@ -164,7 +164,7 @@ main(void)
 
   autostart_start(autostart_processes);
 
-  watchdog_start();
+  //watchdog_start();
 
 #if PLATFORM_PROVIDES_MAIN_LOOP
   platform_main_loop();
