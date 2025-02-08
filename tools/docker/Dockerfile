@@ -1,4 +1,4 @@
-FROM i386/ubuntu:18.04
+FROM ubuntu:22.04
 
 ENV DEBIAN_FRONTEND noninteractive
 
@@ -6,123 +6,161 @@ ENV DEBIAN_FRONTEND noninteractive
 USER root
 
 # Tools
+# build-essential: development tools.
+# clang-15: additional warnings in tests.
+# gdb: development tools.
+# git: development tools.
+# git-lfs: development tools (used by Gecko SDK).
+# gosu: used for UID-remapping.
+# iputils-ping: used by regression tests.
+# less: convenience tool.
+# libcanberra-gtk-module: remove warning message from renode.
+# libcoap2-bin: used by regression tests.
+# libgl1-mesa-glx: required by Simplicity Commander
+# libxtst6: required for GraalVM/Java17 to run Cooja in GUI mode.
+# mosquitto: used by the regression tests.
+# mtr-tiny: used by the regression tests.
+# net-tools: used by the regression tests.
+# python3: used by scripts.
+# snmp: used by the regression tests.
+# sudo: used by the regression tests.
+# tini: needed for cleaning up orphaned processes.
+# udev: needed for jlink deb postinst script.
+# unzip: required during docker image build for software installation.
+# valgrind: used by the regression tests.
+# wget: used by the regression tests.
 RUN apt-get -qq update && \
-    apt-get -qq -y --no-install-recommends install gnupg > /dev/null
-
-RUN apt-key adv --keyserver hkp://keyserver.ubuntu.com:80 --recv-keys 3FA7E0328081BFF6A14DA29AA6A19B38D3D831EF && \
-  echo "deb http://download.mono-project.com/repo/ubuntu bionic main" | tee /etc/apt/sources.list.d/mono-xamarin.list && \
-  apt-get -qq update && \
+    apt-get -qq -y --no-install-recommends install \
+      ca-certificates > /dev/null && \
   apt-get -qq -y --no-install-recommends install \
-    ant \
     build-essential \
-    default-jdk \
-    doxygen \
+    clang-15 \
     gdb \
     git \
-    gtk-sharp2 \
-    iputils-tracepath \
+    git-lfs \
+    gosu \
     iputils-ping \
-    libcanberra-gtk-module:i386 \
-    libgtk2.0-0 \
-    mono-complete \
+    less \
+    libcanberra-gtk-module \
+    libcoap2-bin \
+    libgl1-mesa-glx \
+    libpng-dev \
+    libxtst6 \
     mosquitto \
     mosquitto-clients \
+    mtr-tiny \
     net-tools \
-    npm \
-    openjdk-8-jdk \
-    python-pip \
-    python-serial \
+    python3-dev \
+    python3-pip \
+    python3-setuptools \
+    python3-serial \
     rlwrap \
     sudo \
     screen \
     srecord \
-    uml-utilities \
+    tini \
+    udev \
     unzip \
+    libusb-1.0-0 \
     valgrind \
     wget \
     smitools \
     snmp \
     snmp-mibs-downloader \
-    > /dev/null \
-  && apt-get -qq clean
+    > /dev/null && \
+  apt-get -qq clean
 
-# Install coap-cli
-RUN npm -q install coap-cli@0.5.1 -g
+ARG JAVA_VERSION=21
+RUN wget -nv https://download.oracle.com/graalvm/${JAVA_VERSION}/latest/graalvm-jdk-${JAVA_VERSION}_linux-x64_bin.tar.gz && \
+  tar xf graalvm-jdk-${JAVA_VERSION}_linux-x64_bin.tar.gz -C /usr/local --strip-components=1 --no-same-owner && \
+  rm -f graalvm*gz
 
 # Install ARM toolchain
-RUN wget -nv https://launchpad.net/gcc-arm-embedded/5.0/5-2015-q4-major/+download/gcc-arm-none-eabi-5_2-2015q4-20151219-linux.tar.bz2 && \
-  tar xjf gcc-arm-none-eabi-5_2-2015q4-20151219-linux.tar.bz2 -C /tmp/ && \
-  cp -f -r /tmp/gcc-arm-none-eabi-5_2-2015q4/* /usr/local/ && \
-  rm -rf /tmp/gcc-arm-none-eabi-* gcc-arm-none-eabi-*-linux.tar.bz2
+RUN wget -nv https://developer.arm.com/-/media/Files/downloads/gnu-rm/10.3-2021.10/gcc-arm-none-eabi-10.3-2021.10-x86_64-linux.tar.bz2 && \
+  tar xjf gcc-arm-none-eabi-10.3-2021.10-x86_64-linux.tar.bz2 -C /usr/local --strip-components=1 --no-same-owner && \
+  rm -f gcc-arm-none-eabi-*-linux.tar.bz2
 
 # Install msp430 toolchain
-RUN wget -nv http://simonduq.github.io/resources/mspgcc-4.7.2-compiled.tar.bz2 && \
-  tar xjf mspgcc*.tar.bz2 -C /tmp/ && \
-  cp -f -r /tmp/msp430/* /usr/local/ && \
-  rm -rf /tmp/msp430 mspgcc*.tar.bz2
+RUN wget -nv https://github.com/pjonsson/msp430gcc-binary/releases/download/v1.1/mspgcc-4.7.4-linux-x86_64.tar.bz2 && \
+  tar xf mspgcc*.tar.bz2 -C /usr/local --strip-components=1 --no-same-owner && \
+  rm -f mspgcc*.tar.bz2
 
-# Install NXP toolchain (partial, with binaries excluded. Download from nxp.com)
-RUN wget -nv http://simonduq.github.io/resources/ba-elf-gcc-4.7.4-part1.tar.bz2 && \
-  wget -nv http://simonduq.github.io/resources/ba-elf-gcc-4.7.4-part2.tar.bz2 && \
-  wget -nv http://simonduq.github.io/resources/jn516x-sdk-4163-1416.tar.bz2 && \
-  mkdir /tmp/jn516x-sdk /tmp/ba-elf-gcc && \
-  tar xjf jn516x-sdk-*.tar.bz2 -C /tmp/jn516x-sdk && \
-  tar xjf ba-elf-gcc-*part1.tar.bz2 -C /tmp/ba-elf-gcc && \
-  tar xjf ba-elf-gcc-*part2.tar.bz2 -C /tmp/ba-elf-gcc && \
-  cp -f -r /tmp/jn516x-sdk /usr/ && \
-  cp -f -r /tmp/ba-elf-gcc /usr/ && \
-  rm -rf jn516x*.bz2 ba-elf-gcc*.bz2 /tmp/ba-elf-gcc* /tmp/jn516x-sdk*
+# Install nRF Util+nRF Command Line tools.
+RUN wget -nv -O /usr/local/bin/nrfutil https://developer.nordicsemi.com/.pc-tools/nrfutil/x64-linux/nrfutil && \
+  chmod 755 /usr/local/bin/nrfutil && \
+  wget -nv https://nsscprodmedia.blob.core.windows.net/prod/software-and-other-downloads/desktop-software/nrf-command-line-tools/sw/versions-10-x-x/10-22-0/nrf-command-line-tools_10.22.0_amd64.deb && \
+  apt-get -qq -y --no-install-recommends install ./nrf-command-line-tools_10.22.0_amd64.deb > /dev/null && \
+  apt-get -qq -y --no-install-recommends install /opt/nrf-command-line-tools/share/JLink_Linux_V780c_x86_64.deb > /dev/null && \
+  rm -f *.deb *.tar.gz /opt/nrf-command-line-tools/share/JLink_*deb && \
+  apt-get -qq clean
 
-ENV PATH="/usr/ba-elf-gcc/bin:${PATH}"
+# Install Renode from github releases
+ARG RENODE_VERSION=1.15.2
+RUN wget -nv https://github.com/renode/renode/releases/download/v${RENODE_VERSION}/renode_${RENODE_VERSION}_amd64.deb \
+  && apt-get -qq -y --no-install-recommends install ./renode_${RENODE_VERSION}_amd64.deb > /dev/null \
+  && python3 -m pip -q install -r /opt/renode/tests/requirements.txt \
+  && rm renode_${RENODE_VERSION}_amd64.deb \
+  && rm -rf /root/.cache \
+  && apt-get -qq clean
 
-## Install nRF52 SDK
-RUN wget -nv https://developer.nordicsemi.com/nRF5_IoT_SDK/nRF5_IoT_SDK_v0.9.x/nrf5_iot_sdk_3288530.zip && \
-    mkdir /usr/nrf52-sdk && \
-    unzip -q nrf5_iot_sdk_3288530.zip -d /usr/nrf52-sdk && \
-    rm nrf5_iot_sdk_3288530.zip
+RUN wget -nv https://www.silabs.com/documents/public/software/SimplicityCommander-Linux.zip && \
+  unzip -q SimplicityCommander-Linux.zip && \
+  mkdir /opt/SimplicityCommander && \
+  tar xf SimplicityCommander-Linux/Commander_linux_x86_64_*.tar.bz \
+    -C /opt/SimplicityCommander --strip-components=1 --no-same-owner && \
+  rm -rf SimplicityCommander-Linux.zip SimplicityCommander-Linux
 
-ENV NRF52_SDK_ROOT /usr/nrf52-sdk
+ENV PATH="/opt/SimplicityCommander:${PATH}"
 
-# Install sphinx and sphinx_rtd_theme, required for building and testing the
-# readthedocs API documentation
-RUN pip -q install --upgrade pip
-RUN pip -q install setuptools && pip -q install sphinx_rtd_theme sphinx
+# Sphinx is required for building the readthedocs API documentation.
+# RTD requirements are shared with .readthedocs.yaml for build consistency - check RTD build if modifying.
+# Matplotlib is required for result visualization.
+# Keep the image size down by removing the pip cache when done.
+COPY files/rtd_requirements.txt /tmp
+RUN python3 -m pip -q install \
+      matplotlib && \
+    python3 -m pip -q install -r /tmp/rtd_requirements.txt && \
+    rm -rf /root/.cache /tmp/rtd_requirements.txt
 
-# Create user, enable X forwarding, add to group dialout
-# -e DISPLAY=$DISPLAY -v /tmp/.X11-unix:/tmp/.X11-unix
-RUN export uid=1000 gid=1000 && \
-    mkdir -p /home/user && \
-    echo "user:x:${uid}:${gid}:user,,,:/home/user:/bin/bash" >> /etc/passwd && \
-    echo "user:x:${uid}:" >> /etc/group && \
-    echo "user ALL=(ALL) NOPASSWD: ALL" > /etc/sudoers && \
-    chmod 0440 /etc/sudoers && \
-    chown ${uid}:${gid} -R /home/user && \
-    usermod -aG dialout user
+# Create user, add to groups dialout and sudo, and configure sudoers.
+RUN adduser --disabled-password --gecos '' user && \
+    usermod -aG dialout,plugdev,sudo user && \
+    echo '%sudo ALL=(ALL) NOPASSWD:ALL' >> /etc/sudoers
 
 # Set user for what comes next
 USER user
 
 # Environment variables
-ENV JAVA_HOME           /usr/lib/jvm/default-java
 ENV HOME                /home/user
 ENV CONTIKI_NG          ${HOME}/contiki-ng
 ENV COOJA               ${CONTIKI_NG}/tools/cooja
-ENV                     PATH="${HOME}:${PATH}"
+ENV                     PATH="${HOME}/.local/bin:${PATH}"
+ENV                     LC_ALL=C.UTF-8
+ENV                     LANG=C.UTF-8
 WORKDIR                 ${HOME}
 
 # Create Cooja shortcut
-RUN echo "#!/bin/bash\nant -Dbasedir=${COOJA} -f ${COOJA}/build.xml run" > ${HOME}/cooja && \
-  chmod +x ${HOME}/cooja
+COPY --chown=user:user files/cooja ${HOME}/.local/bin/cooja
+# Add aliases for CI. Use a file to avoid quoting issues.
+COPY --chown=user:user files/bash_aliases ${HOME}/.bash_aliases
+# Add login-script for UID/GID-remapping.
+COPY --chown=root:root files/remap-user.sh /usr/local/bin/remap-user.sh
 
-# Make sure we're using Java 8 for Cooja
-RUN sudo update-java-alternatives --set /usr/lib/jvm/java-1.8.0-openjdk-i386
+# Doxygen 1.8.17 in Ubuntu 20.04 gives (false) warnings on mqtt.h.
+# Use a binary from the Doxygen homepage, static linking started with 1.9.3.
+# Remove the PDF manual and html directory to reduce image size.
+# Use the most recent version of ccache to ensure it supports the compiler
+# versions in the docker image.
+RUN wget -nv https://sourceforge.net/projects/doxygen/files/rel-1.10.0/doxygen-1.10.0.linux.bin.tar.gz/download -O doxygen.linux.bin.tar.gz && \
+    tar zxf doxygen.linux.bin.tar.gz -C ${HOME}/.local && \
+    rm -rf ${HOME}/.local/doxygen-1.10.0/html ${HOME}/.local/doxygen-1.10.0/*.pdf doxygen.linux.bin.tar.gz && \
+    (cd ${HOME}/.local/bin && ln -s ../doxygen-1.10.0/bin/doxygen .) && \
+    wget -nv https://github.com/ccache/ccache/releases/download/v4.10.2/ccache-4.10.2-linux-x86_64.tar.xz && \
+    tar xf ccache-4.10.2-linux-x86_64.tar.xz -C ${HOME}/.local/bin --strip-components=1 ccache-4.10.2-linux-x86_64/ccache && \
+    rm ccache-*-linux-x86_64.tar.xz
 
-# Download, build and install Renode
-RUN git clone --quiet https://github.com/renode/renode.git \
-  && cd ${HOME}/renode \
-  && git checkout v1.3 \
-  && ./build.sh
-ENV PATH="${HOME}/renode:${PATH}"
+# Install additional tools for the nRF5 SDK.
+RUN nrfutil install nrf5sdk-tools
 
 # By default, we use a Docker bind mount to share the repo with the host,
 # with Docker run option:
@@ -135,4 +173,6 @@ ENV PATH="${HOME}/renode:${PATH}"
 WORKDIR ${CONTIKI_NG}
 
 # Start a bash
+USER root
+ENTRYPOINT ["/usr/local/bin/remap-user.sh"]
 CMD bash --login

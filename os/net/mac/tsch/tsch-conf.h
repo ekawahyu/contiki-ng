@@ -39,8 +39,8 @@
  *         Simon Duquennoy <simonduq@sics.se>
  */
 
-#ifndef __TSCH_CONF_H__
-#define __TSCH_CONF_H__
+#ifndef TSCH_CONF_H_
+#define TSCH_CONF_H_
 
 /********** Includes **********/
 
@@ -71,14 +71,20 @@
 #define TSCH_DESYNC_THRESHOLD (2 * TSCH_MAX_KEEPALIVE_TIMEOUT)
 #endif
 
-/* Period between two consecutive EBs */
+/* The default period between two consecutive EBs (not taking into account any randomization).
+ * When TSCH_CONF_EB_PERIOD is set to 0, sending EBs is disabled completely; the EB process is not started.
+ * Otherwise, if RPL is used, TSCH_CONF_EB_PERIOD used only before joining the RPL network;
+ * afterwards, the EB period is set dynamically based on RPL DIO period, updated whenever
+ * the DIO period changes, and is upper bounded by TSCH_MAX_EB_PERIOD.
+ */
 #ifdef TSCH_CONF_EB_PERIOD
 #define TSCH_EB_PERIOD TSCH_CONF_EB_PERIOD
 #else
 #define TSCH_EB_PERIOD (16 * CLOCK_SECOND)
 #endif
 
-/* Max Period between two consecutive EBs */
+/* Max Period between two consecutive EBs.
+ * Has no effect when TSCH_EB_PERIOD is zero. */
 #ifdef TSCH_CONF_MAX_EB_PERIOD
 #define TSCH_MAX_EB_PERIOD TSCH_CONF_MAX_EB_PERIOD
 #else
@@ -323,7 +329,7 @@
 #ifdef TSCH_CONF_BURST_MAX_LEN
 #define TSCH_BURST_MAX_LEN TSCH_CONF_BURST_MAX_LEN
 #else
-#define TSCH_BURST_MAX_LEN 32
+#define TSCH_BURST_MAX_LEN 0
 #endif
 
 /* 6TiSCH Minimal schedule slotframe length */
@@ -337,7 +343,7 @@
 #ifdef TSCH_SCHEDULE_CONF_MAX_SLOTFRAMES
 #define TSCH_SCHEDULE_MAX_SLOTFRAMES TSCH_SCHEDULE_CONF_MAX_SLOTFRAMES
 #else
-#define TSCH_SCHEDULE_MAX_SLOTFRAMES 4
+#define TSCH_SCHEDULE_MAX_SLOTFRAMES 5
 #endif
 
 /* Max number of links */
@@ -362,6 +368,13 @@
 #define TSCH_WITH_LINK_SELECTOR (BUILD_WITH_ORCHESTRA)
 #endif /* TSCH_CONF_WITH_LINK_SELECTOR */
 
+/* Configurable link comparator in case multiple links are scheduled at the same slot */
+#ifdef TSCH_CONF_LINK_COMPARATOR
+#define TSCH_LINK_COMPARATOR TSCH_CONF_LINK_COMPARATOR
+#else
+#define TSCH_LINK_COMPARATOR(a, b) default_tsch_link_comparator(a, b)
+#endif
+
 /******** Configuration: CSMA *******/
 
 /* TSCH CSMA-CA parameters, see IEEE 802.15.4e-2012 */
@@ -378,6 +391,11 @@
 #define TSCH_MAC_MAX_BE TSCH_CONF_MAC_MAX_BE
 #else
 #define TSCH_MAC_MAX_BE 5
+#endif
+
+/* Avoid potential 16-bit integer overflow */
+#if TSCH_MAC_MAX_BE > 16
+#error TSCH_MAC_MAX_BE must be 16 or lower to avoid uint16_t overflows
 #endif
 
 /* Max number of re-transmissions */
@@ -432,10 +450,17 @@ by default, useful in case of duplicate seqno */
 #define TSCH_DEFAULT_TIMESLOT_TIMING tsch_timeslot_timing_us_10000
 #endif
 
+/* Is the timing template dynamic. */
+#ifdef TSCH_CONF_DYNAMIC_TIMESLOT_TEMPLATE
+#define TSCH_DYNAMIC_TIMESLOT_TEMPLATE TSCH_CONF_DYNAMIC_TIMESLOT_TEMPLATE
+#else
+#define TSCH_DYNAMIC_TIMESLOT_TEMPLATE 0
+#endif
+
 /* Configurable Rx guard time is micro-seconds */
 #ifndef TSCH_CONF_RX_WAIT
 #define TSCH_CONF_RX_WAIT 2200
 #endif /* TSCH_CONF_RX_WAIT */
 
-#endif /* __TSCH_CONF_H__ */
+#endif /* TSCH_CONF_H_ */
 /** @} */

@@ -49,6 +49,7 @@
 #include <signal.h>
 #include <termios.h>
 #include <sys/ioctl.h>
+#include <sys/uio.h>
 
 #include <sys/socket.h>
 #include <netinet/in.h>
@@ -74,10 +75,10 @@ int timestamp = 0, flowcontrol=0, showprogress=0, flowcontrol_xonxoff=0;
 
 int ssystem(const char *fmt, ...)
      __attribute__((__format__ (__printf__, 1, 2)));
-void write_to_serial(int outfd, void *inbuf, int len);
+void write_to_serial(void *inbuf, int len);
 
-void slip_send(int fd, unsigned char c);
-void slip_send_char(int fd, unsigned char c);
+void slip_send(unsigned char c);
+void slip_send_char(unsigned char c);
 
 #define PROGRESS(s) if(showprogress) fprintf(stderr, s)
 
@@ -162,6 +163,13 @@ is_sensible_string(const unsigned char *s, int len)
       return 0;
     }
   }
+
+  /* Edge-case: printable characters in flow label */
+  if(len >= 2 && (s[0] & 0xF0) == 0x60 
+              && (s[1] == '\r' || s[1] == '\n' || s[1] == '\t')) {
+    return 0;
+  }
+
   return 1;
 }
 
@@ -245,13 +253,13 @@ serial_to_tun(FILE *inslip, int outfd)
 		 addr.s6_addr[2], addr.s6_addr[3],
 		 addr.s6_addr[4], addr.s6_addr[5],
 		 addr.s6_addr[6], addr.s6_addr[7]);
-	  slip_send(slipfd, '!');
-	  slip_send(slipfd, 'P');
+	  slip_send('!');
+	  slip_send('P');
 	  for(i = 0; i < 8; i++) {
 	    /* need to call the slip_send_char for stuffing */
-	    slip_send_char(slipfd, addr.s6_addr[i]);
+	    slip_send_char(addr.s6_addr[i]);
 	  }
-	  slip_send(slipfd, SLIP_END);
+	  slip_send(SLIP_END);
         }
 #define DEBUG_LINE_MARKER '\r'
       } else if(uip.inbuf[0] == DEBUG_LINE_MARKER) {
@@ -280,9 +288,26 @@ serial_to_tun(FILE *inslip, int outfd)
             printf("\n");
           }
         }
-	if(write(outfd, uip.inbuf, inbufptr) != inbufptr) {
-	  err(1, "serial_to_tun: write");
-	}
+
+#ifdef __APPLE__
+        /* Fake IFF_NO_PI on macOS by sending a 4 byte header containing AF_INET6 */
+        u_int32_t type = htonl(AF_INET6);
+        struct iovec iv[2];
+
+        iv[0].iov_base = &type;
+        iv[0].iov_len = sizeof(type);
+        iv[1].iov_base = uip.inbuf;
+        iv[1].iov_len = inbufptr;
+
+        if(writev(outfd, iv, 2) != (sizeof(type) + inbufptr)) {
+          err(1, "serial_to_tun: writev");
+        }
+#else
+        if(write(outfd, uip.inbuf, inbufptr) != inbufptr) {
+          err(1, "serial_to_tun: write");
+        }
+#endif
+
       }
       inbufptr = 0;
     }
@@ -338,44 +363,44 @@ serial_to_tun(FILE *inslip, int outfd)
 }
 
 unsigned char slip_buf[2000];
-int slip_end, slip_begin;
+unsigned int slip_end, slip_begin;
 
 void
-slip_send_char(int fd, unsigned char c)
+slip_send_char(unsigned char c)
 {
   switch(c) {
   case SLIP_END:
-    slip_send(fd, SLIP_ESC);
-    slip_send(fd, SLIP_ESC_END);
+    slip_send(SLIP_ESC);
+    slip_send(SLIP_ESC_END);
     break;
   case SLIP_ESC:
-    slip_send(fd, SLIP_ESC);
-    slip_send(fd, SLIP_ESC_ESC);
+    slip_send(SLIP_ESC);
+    slip_send(SLIP_ESC_ESC);
     break;
   case XON:
     if(flowcontrol_xonxoff) {
-      slip_send(fd, SLIP_ESC);
-      slip_send(fd, SLIP_ESC_XON);
+      slip_send(SLIP_ESC);
+      slip_send(SLIP_ESC_XON);
     } else {
-      slip_send(fd, c);
+      slip_send(c);
     }
     break;
   case XOFF:
     if(flowcontrol_xonxoff) {
-      slip_send(fd, SLIP_ESC);
-      slip_send(fd, SLIP_ESC_XOFF);
+      slip_send(SLIP_ESC);
+      slip_send(SLIP_ESC_XOFF);
     } else {
-      slip_send(fd, c);
+      slip_send(c);
     }
     break;
   default:
-    slip_send(fd, c);
+    slip_send(c);
     break;
   }
 }
 
 void
-slip_send(int fd, unsigned char c)
+slip_send(unsigned char c)
 {
   if(slip_end >= sizeof(slip_buf)) {
     err(1, "slip_send overflow");
@@ -414,7 +439,7 @@ slip_flushbuf(int fd)
 }
 
 void
-write_to_serial(int outfd, void *inbuf, int len)
+write_to_serial(void *inbuf, int len)
 {
   u_int8_t *p = inbuf;
   int i;
@@ -441,40 +466,40 @@ write_to_serial(int outfd, void *inbuf, int len)
   /* It would be ``nice'' to send a SLIP_END here but it's not
    * really necessary.
    */
-  /* slip_send(outfd, SLIP_END); */
+  /* slip_send(SLIP_END); */
 
   for(i = 0; i < len; i++) {
     switch(p[i]) {
     case SLIP_END:
-      slip_send(outfd, SLIP_ESC);
-      slip_send(outfd, SLIP_ESC_END);
+      slip_send(SLIP_ESC);
+      slip_send(SLIP_ESC_END);
       break;
     case SLIP_ESC:
-      slip_send(outfd, SLIP_ESC);
-      slip_send(outfd, SLIP_ESC_ESC);
+      slip_send(SLIP_ESC);
+      slip_send(SLIP_ESC_ESC);
       break;
     case XON:
       if(flowcontrol_xonxoff) {
-        slip_send(outfd, SLIP_ESC);
-        slip_send(outfd, SLIP_ESC_XON);
+        slip_send(SLIP_ESC);
+        slip_send(SLIP_ESC_XON);
       } else {
-        slip_send(outfd, p[i]);
+        slip_send(p[i]);
       }
       break;
     case XOFF:
       if(flowcontrol_xonxoff) {
-        slip_send(outfd, SLIP_ESC);
-        slip_send(outfd, SLIP_ESC_XOFF);
+        slip_send(SLIP_ESC);
+        slip_send(SLIP_ESC_XOFF);
       } else {
-        slip_send(outfd, p[i]);
+        slip_send(p[i]);
       }
       break;
     default:
-      slip_send(outfd, p[i]);
+      slip_send(p[i]);
       break;
     }
   }
-  slip_send(outfd, SLIP_END);
+  slip_send(SLIP_END);
   PROGRESS("t");
 }
 
@@ -483,7 +508,7 @@ write_to_serial(int outfd, void *inbuf, int len)
  * Read from tun, write to slip.
  */
 int
-tun_to_serial(int infd, int outfd)
+tun_to_serial(int infd)
 {
   struct {
     unsigned char inbuf[2000];
@@ -491,8 +516,18 @@ tun_to_serial(int infd, int outfd)
   int size;
 
   if((size = read(infd, uip.inbuf, 2000)) == -1) err(1, "tun_to_serial: read");
+  
+#ifdef __APPLE__
+#define UTUN_HEADER_LEN 4
+  /* Fake IFF_NO_PI on macOS by ignoring the first 4 bytes containing AF_INET6 */
+  if(size <= UTUN_HEADER_LEN) err(1, "tun_to_serial: read too small");
 
-  write_to_serial(outfd, uip.inbuf, size);
+  size -= UTUN_HEADER_LEN;
+  write_to_serial(uip.inbuf + UTUN_HEADER_LEN, size);
+#undef UTUN_HEADER_LEN
+#else
+  write_to_serial(uip.inbuf, size);
+#endif
   return size;
 }
 
@@ -595,6 +630,73 @@ tun_alloc(char *dev, int tap)
   strcpy(dev, ifr.ifr_name);
   return fd;
 }
+
+#elif defined __APPLE__
+#include <sys/sys_domain.h>
+#include <sys/kern_control.h>
+#include <net/if_utun.h>
+
+/* 
+ * Reference for utun on macOS:
+ * http://newosxbook.com/src.jl?tree=listings&file=17-15-utun.c 
+ */
+int
+tun_alloc(char *dev, int tap)
+{
+  struct sockaddr_ctl sc;
+  struct ctl_info ctlInfo;
+  int fd;
+  unsigned int tunif;
+
+  if(tap) {
+    err(1, "tun_alloc: TAP is not supported with utun on macOS");
+    return -1;
+  }
+
+  if(sscanf(dev, "utun%u", &tunif) != 1 || tunif >= UINT8_MAX) {
+    err(1, "tun_alloc: invalid utun interface specified");
+    return -1;
+  }
+
+  memset(&ctlInfo, 0, sizeof(ctlInfo));
+  if(strlcpy(ctlInfo.ctl_name, UTUN_CONTROL_NAME, sizeof(ctlInfo.ctl_name)) >=
+      sizeof(ctlInfo.ctl_name)) {
+    fprintf(stderr, "UTUN_CONTROL_NAME too long");
+    return -1;
+  }
+
+  fd = socket(PF_SYSTEM, SOCK_DGRAM, SYSPROTO_CONTROL);
+   
+  if(fd == -1) {
+    perror("socket(SYSPROTO_CONTROL)");
+    return -1;
+  }
+
+  if(ioctl(fd, CTLIOCGINFO, &ctlInfo) == -1) {
+    perror("ioctl(CTLIOCGINFO)");
+    close(fd);
+    return -1;
+  }
+
+  sc.sc_id = ctlInfo.ctl_id;
+  sc.sc_len = sizeof(sc);
+  sc.sc_family = AF_SYSTEM;
+  sc.ss_sysaddr = AF_SYS_CONTROL;
+  sc.sc_unit = tunif + 1;
+
+  /*
+   * If the connect is successful, a utun%d device will be created, where "%d"
+   * is our unit number -1
+   */
+
+  if(connect(fd, (struct sockaddr *)&sc, sizeof(sc)) == -1) {
+    perror("connect(AF_SYS_CONTROL)");
+    close(fd);
+    return -1;
+  }
+
+  return fd;
+}
 #else
 int
 tun_alloc(char *dev, int tap)
@@ -620,15 +722,10 @@ cleanup(void)
 	  tundev);
 #else
   {
-    char *  itfaddr = strdup(ipaddr);
-    char *  prefix = index(itfaddr, '/');
     if (timestamp) stamptime();
     ssystem("ifconfig %s inet6 %s remove", tundev, ipaddr);
     if (timestamp) stamptime();
     ssystem("ifconfig %s down", tundev);
-    if ( prefix != NULL ) *prefix = '\0';
-    ssystem("route delete -inet6 %s", itfaddr);
-    free(itfaddr);
   }
 #endif
 }
@@ -833,9 +930,11 @@ main(int argc, char **argv)
       if (optarg) verbose = atoi(optarg);
       break;
 
+#ifndef __APPLE__
     case 'T':
       tap = 1;
       break;
+#endif
 
     case '?':
     case 'h':
@@ -848,33 +947,44 @@ fprintf(stderr," -B baudrate    9600,19200,38400,57600,115200 (default),230400,4
 #else
 fprintf(stderr," -B baudrate    9600,19200,38400,57600,115200 (default),230400\n");
 #endif
-fprintf(stderr," -H             Hardware CTS/RTS flow control (default disabled)\n");
-fprintf(stderr," -I             Inquire IP address\n");
-fprintf(stderr," -X             Software XON/XOFF flow control (default disabled)\n");
-fprintf(stderr," -L             Log output format (adds time stamps)\n");
-fprintf(stderr," -s siodev      Serial device (default /dev/ttyUSB0)\n");
-fprintf(stderr," -M             Interface MTU (default and min: 1280)\n");
-fprintf(stderr," -T             Make tap interface (default is tun interface)\n");
-fprintf(stderr," -t tundev      Name of interface (default tap0 or tun0)\n");
+fprintf(stderr, " -P             Show progress\n");
+fprintf(stderr, " -H             Hardware CTS/RTS flow control (default disabled)\n");
+fprintf(stderr, " -I             Inquire IP address\n");
+fprintf(stderr, " -X             Software XON/XOFF flow control (default disabled)\n");
+fprintf(stderr, " -L             Log output format (adds time stamps)\n");
+fprintf(stderr, " -s siodev      Serial device (default /dev/ttyUSB0)\n");
+fprintf(stderr, " -M             Interface MTU (default and min: 1280)\n");
 #ifdef __APPLE__
-fprintf(stderr," -v level       Verbosity level\n");
+fprintf(stderr, " -t tundev      Name of interface (default utun10)\n");
 #else
-fprintf(stderr," -v[level]      Verbosity level\n");
+fprintf(stderr, " -T             Make tap interface (default is tun interface)\n");
+fprintf(stderr, " -t tundev      Name of interface (default tap0 or tun0)\n");
 #endif
-fprintf(stderr,"    -v0         No messages\n");
-fprintf(stderr,"    -v1         Encapsulated SLIP debug messages\n");
-fprintf(stderr,"    -v2         Printable strings after they are received (default)\n");
-fprintf(stderr,"    -v3         Printable strings and SLIP packet notifications\n");
-fprintf(stderr,"    -v4         All printable characters as they are received\n");
-fprintf(stderr,"    -v5         All SLIP packets in hex\n");
+#ifdef __APPLE__
+fprintf(stderr, " -v level       Verbosity level\n");
+#else
+fprintf(stderr, " -v[level]      Verbosity level\n");
+#endif
+fprintf(stderr, "    -v0         No messages\n");
+fprintf(stderr, "    -v1         Encapsulated SLIP debug messages\n");
+fprintf(stderr, "    -v2         Printable strings after they are received (default)\n");
+fprintf(stderr, "    -v3         Printable strings and SLIP packet notifications\n");
+fprintf(stderr, "    -v4         All printable characters as they are received\n");
+fprintf(stderr, "    -v5         All SLIP packets in hex\n");
 #ifndef __APPLE__
-fprintf(stderr,"    -v          Equivalent to -v2\n");
+fprintf(stderr, "    -v          Equivalent to -v2\n");
 #endif
-fprintf(stderr," -d[basedelay]  Minimum delay between outgoing SLIP packets.\n");
-fprintf(stderr,"                Actual delay is basedelay*(#6LowPAN fragments) milliseconds.\n");
-fprintf(stderr,"                -d is equivalent to -d10.\n");
-fprintf(stderr," -a serveraddr  \n");
-fprintf(stderr," -p serverport  \n");
+#ifdef __APPLE__
+fprintf(stderr, " -d basedelay   Minimum delay between outgoing SLIP packets.\n");
+#else
+fprintf(stderr, " -d[basedelay]  Minimum delay between outgoing SLIP packets.\n");
+#endif
+fprintf(stderr, "                Actual delay is basedelay*(#6LowPAN fragments) milliseconds.\n");
+#ifndef __APPLE__
+fprintf(stderr, "                -d is equivalent to -d10.\n");
+#endif
+fprintf(stderr, " -a serveraddr  \n");
+fprintf(stderr, " -p serverport  \n");
 exit(1);
       break;
     }
@@ -883,7 +993,13 @@ exit(1);
   argv += (optind - 1);
 
   if(argc != 2 && argc != 3) {
-    err(1, "usage: %s [-B baudrate] [-H] [-L] [-s siodev] [-t tundev] [-T] [-v verbosity] [-d delay] [-a serveraddress] [-p serverport] ipaddress", prog);
+    err(1, "usage: %s [-B baudrate] [-P] [-H] [-I] [-X] [-L] [-s siodev] [-M] [-T] [-t tundev] "
+#ifdef __APPLE__
+           "[-v level] [-d basedelay] "
+#else
+           "[-v [level]] [-d [basedelay]] "
+#endif
+           "[-a serveraddr] [-p serverport] ipaddress", prog);
   }
   ipaddr = argv[1];
 
@@ -896,12 +1012,9 @@ exit(1);
 
 #ifdef __APPLE__
   if(*tundev == '\0') {
-    /* Use default. */
-    if(tap) {
-      strcpy(tundev, "tap0");
-    } else {
-      strcpy(tundev, "tun0");
-    }
+    /* utun0-3 are in use on Big Sur, so use utun10 as default */
+
+    strcpy(tundev, "utun10");
   }
 #endif
 
@@ -931,8 +1044,8 @@ exit(1);
       }
 
       if(connect(slipfd, p->ai_addr, p->ai_addrlen) == -1) {
-        close(slipfd);
         perror("client: connect");
+        close(slipfd);
         continue;
       }
       break;
@@ -977,7 +1090,7 @@ exit(1);
     fprintf(stderr, "********SLIP started on ``/dev/%s''\n", siodev);
     stty_telos(slipfd);
   }
-  slip_send(slipfd, SLIP_END);
+  slip_send(SLIP_END);
   inslip = fdopen(slipfd, "r");
   if(inslip == NULL) err(1, "main: fdopen");
 
@@ -1001,11 +1114,11 @@ exit(1);
 
     if(got_sigalarm && ipa_enable) {
       /* Send "?IPA". */
-      slip_send(slipfd, '?');
-      slip_send(slipfd, 'I');
-      slip_send(slipfd, 'P');
-      slip_send(slipfd, 'A');
-      slip_send(slipfd, SLIP_END);
+      slip_send('?');
+      slip_send('I');
+      slip_send('P');
+      slip_send('A');
+      slip_send(SLIP_END);
       got_sigalarm = 0;
     }
 
@@ -1047,7 +1160,7 @@ exit(1);
       }
       if(delaymsec==0) {
         if(slip_empty() && FD_ISSET(tunfd, &rset)) {
-          tun_to_serial(tunfd, slipfd);
+          tun_to_serial(tunfd);
           slip_flushbuf(slipfd);
           if(ipa_enable) sigalarm_reset();
           if(basedelay) {

@@ -56,31 +56,36 @@
 /*- Separate Response API ---------------------------------------------------*/
 /*---------------------------------------------------------------------------*/
 /**
- * \brief Reject a request that would require a separate response with an error message
+ * \brief Reject a request that would require a separate response with
+ * an error message
  *
- * When the server does not have enough resources left to store the information
- * for a separate response or otherwise cannot execute the resource handler,
- * this function will respond with 5.03 Service Unavailable. The client can
- * then retry later.
+ * When the server does not have enough resources left to store the
+ * information for a separate response, or otherwise cannot execute
+ * the resource handler, this function will respond with <tt>5.03
+ * Service Unavailable</tt>. The client can then retry later.
  */
 void
 coap_separate_reject()
 {
   /* TODO: Accept string pointer for custom error message */
   coap_status_code = SERVICE_UNAVAILABLE_5_03;
+#if COAP_MESSAGE_ON_ERROR
   coap_error_message = "AlreadyInUse";
+#endif
 }
 /*----------------------------------------------------------------------------*/
 /**
- * \brief Initiate a separate response with an empty ACK
- * \param coap_req The request to accept
- * \param separate_store A pointer to the data structure that will store the
- *   relevant information for the response
+ * \brief Initiate a separate response with an empty ACK.
  *
- * When the server does not have enough resources left to store the information
- * for a separate response or otherwise cannot execute the resource handler,
- * this function will respond with 5.03 Service Unavailable. The client can
- * then retry later.
+ * When the server does not have enough resources left to store the
+ * information for a separate response, or otherwise cannot execute
+ * the resource handler, this function will respond with <tt>5.03
+ * Service Unavailable</tt>. The client can then retry later.
+ *
+ * \param coap_req The request to accept.
+ *
+ * \param separate_store A pointer to the data structure that will store the
+ *   relevant information for the response.
  */
 void
 coap_separate_accept(coap_message_t *coap_req, coap_separate_t *separate_store)

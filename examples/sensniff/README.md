@@ -1,12 +1,14 @@
-sensniff Contiki Project
-========================
+# sensniff
+
+## sensniff Contiki Project
+
 This example can be used to create an IEEE 802.15.4 wireless sniffer firmware,
 meant to be used in parallel with
 [sensniff](https://github.com/g-oikonomou/sensniff). Sensniff is distributed
 standalone, but also as part of Contiki-NG under `tools/sensniff`.
 
-Running
-=======
+### Running
+
 * Build this example and program your device
 * Connect your device to a host
 * Run sensniff on your host
@@ -28,8 +30,8 @@ through sensniff's text interface.
 
 More details in sensniff's README.
 
-Adding support for more platforms
-=================================
+### Adding support for more platforms
+
 Firstly, this example will try to turn off frame filtering and automatic h/w
 ACKs by calling `NETSTACK_RADIO.set_value(RADIO_PARAM_RX_MODE, 0)`. If your
 radio does not support this, then implementing this is your first step towards
@@ -51,12 +53,13 @@ The following radios have been tested:
 * CC2530/CC2531
 * CC1200
 * RF233
+* nRF52840
 
 Once you have the radio sorted out, you also need to configure character I/O.
 The firmware captures wireless frames and streams them over a serial line to
 the host where your device is connected. This can be achieved over UART or over
 CDC-ACM. The example makes zero assumptions about your hardware's capability,
-you have to configure thnigs explicitly. 
+you have to configure things explicitly.
 
 * Firstly, create a directory named the same as your platform. Crate a header
 file therein called `target-conf.h`. This will get included automatically.

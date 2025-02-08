@@ -40,6 +40,7 @@
 #include "net/packetbuf.h"
 #include "net/queuebuf.h"
 #include "net/netstack.h"
+#include "net/mac/mac-sequence.h"
 #include "packetutils.h"
 #include "border-router.h"
 #include <string.h>
@@ -88,7 +89,8 @@ packet_sent(uint8_t sessionid, uint8_t status, uint8_t tx)
     packetbuf_attr_copyfrom(callback->attrs, callback->addrs);
     mac_call_sent_callback(callback->cback, callback->ptr, status, tx);
   } else {
-    LOG_ERR("Session id to high (%d)\n", sessionid);
+    LOG_ERR("Session id (%d) >= MAX_CALLBACKS (%d)\n", sessionid,
+            MAX_CALLBACKS);
   }
 }
 /*---------------------------------------------------------------------------*/
@@ -126,6 +128,9 @@ send_packet(mac_callback_t sent, void *ptr)
   /* Will make it send only DATA packets... for now */
   packetbuf_set_attr(PACKETBUF_ATTR_FRAME_TYPE, FRAME802154_DATAFRAME);
 
+  /* set destination sequence number */
+  mac_sequence_set_dsn();
+
   LOG_INFO("sending packet (%u bytes)\n", packetbuf_datalen());
 
   if(NETSTACK_FRAMER.create() < 0) {
@@ -134,9 +139,10 @@ send_packet(mac_callback_t sent, void *ptr)
     mac_call_sent_callback(sent, ptr, MAC_TX_ERR_FATAL, 1);
   } else {
     /* here we send the data over SLIP to the radio-chip */
-    size = 0;
 #if SERIALIZE_ATTRIBUTES
     size = packetutils_serialize_atts(&buf[3], sizeof(buf) - 3);
+#else
+    size = 0;
 #endif
     if(size < 0 || size + packetbuf_totlen() + 3 > sizeof(buf)) {
       LOG_WARN("send failed, too large header\n");
@@ -189,6 +195,7 @@ static void
 init(void)
 {
   callback_pos = 0;
+  mac_sequence_init();
 }
 /*---------------------------------------------------------------------------*/
 const struct mac_driver border_router_mac_driver = {

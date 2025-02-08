@@ -34,6 +34,9 @@
 # example and platform combinations that are marked as impossible in the Makefiles
 # by using PLATFORMS_EXCLUDE and PLATFORMS_ONLY variables.
 #
+# To build with gmake and 8 cores, invoke with:
+# MAKE="gmake" MAKEFLAGS="-j8" ./build.sh all
+#
 # This script can also clean all targets. To do that, run:
 # ./build.sh clean
 #
@@ -52,6 +55,8 @@ if [[ "$MAKEFILES" == "" ]]
 then
     MAKEFILES=`find $EXAMPLES_DIR -name Makefile`
 fi
+
+[[ "$MAKE" != "" ]] || MAKE="make"
 
 HELLO_WORLD=$EXAMPLES_DIR/hello-world
 
@@ -88,8 +93,11 @@ else
 fi
 
 NUM_SUCCESS=0
+NUM_SKIPPED=0
 NUM_FAILED=0
 
+rm -f failed.log
+rm -f failed-full.log
 FAILED=
 
 for platform in $PLATFORMS
@@ -104,7 +112,7 @@ do
     # Detect all boards for the current platform by calling
     # make TARGET=$platform boards
     # in the hello-world dir.
-    BOARDS=`make -s -C $HELLO_WORLD TARGET=$platform boards \
+    BOARDS=`$MAKE -s -C $HELLO_WORLD TARGET=$platform boards \
             | grep -v "no boards" | rev | cut -f3- -d" " | rev`
 
     if [[ -z $BOARDS ]]
@@ -123,7 +131,7 @@ do
             example_dir=`dirname "$example"`
 
             # Clean it before building
-            make -C "$example_dir" TARGET=$platform BOARD=$board clean 2>&1 >/dev/null
+            $MAKE -C "$example_dir" TARGET=$platform BOARD=$board clean 2>&1 >/dev/null
             if [[ "$GOAL" == "clean" ]]
             then
                # do this just for the first board
@@ -131,21 +139,30 @@ do
             fi
 
             # Build the goal
-            $LOG_INFO "make -C \"$example_dir\" -j TARGET=$platform BOARD=$board $GOAL"
-            if make -C "$example_dir" -j TARGET=$platform BOARD=$board $GOAL 2>&1 >build.log
+            $LOG_INFO "$MAKE -C \"$example_dir\" $MAKEFLAGS TARGET=$platform BOARD=$board $GOAL"
+            if $MAKE -C "$example_dir" $MAKEFLAGS TARGET=$platform BOARD=$board $GOAL >build.log 2>&1
             then
                 $LOG_INFO "..done"
                 $CAT_DEBUG build.log
-                NUM_SUCCESS=$(($NUM_SUCCESS + 1))
+                if [[ `grep Skipping build.log` ]]
+                then
+                    NUM_SKIPPED=$(($NUM_SKIPPED + 1))
+                else
+                    NUM_SUCCESS=$(($NUM_SUCCESS + 1))
+                fi
             else
                 $LOG_INFO "Failed to build $example_dir for $platform ($board)"
                 $CAT_DEBUG build.log
+                echo "TARGET=$platform BOARD=$board $example_dir" >> failed.log
+                echo "TARGET=$platform BOARD=$board $example_dir" >> failed-full.log
+                cat build.log >> failed-full.log
+                echo "=====================" >> failed-full.log
                 NUM_FAILED=$(($NUM_FAILED + 1))
                 FAILED="$FAILED; $example_dir for $platform ($board)"
             fi
 
             # Clean it after building
-            make -C "$example_dir" TARGET=$platform BOARD=$board clean 2>&1 >/dev/null
+            $MAKE -C "$example_dir" TARGET=$platform BOARD=$board clean 2>&1 >/dev/null
         done
     done
 done
@@ -153,7 +170,8 @@ done
 # If building, not cleaning, print so statistics
 if [[ "$GOAL" == "all" ]]
 then
-    $LOG_INFO "Number of examples skipped or built successfully: $NUM_SUCCESS"
+    $LOG_INFO "Number of examples built successfully: $NUM_SUCCESS"
+    $LOG_INFO "Number of examples skipped: $NUM_SKIPPED"
     $LOG_INFO "Number of examples that failed to build: $NUM_FAILED"
     $LOG_INFO "Failed examples: $FAILED"
 fi

@@ -38,6 +38,7 @@
 
 #include "net/packetbuf.h"
 #include "net/netstack.h"
+#include "sys/energest.h"
 
 #include "dev/radio.h"
 #include "dev/cooja-radio.h"
@@ -53,9 +54,26 @@
 #define COOJA_RADIO_BUFSIZE 125
 #endif
 
+#define MIN_CHANNEL 11
+#define MAX_CHANNEL 26
 #define CCA_SS_THRESHOLD -95
 
-const struct simInterface radio_interface;
+/* The radio driver can provide Cooja these values.
+ * But at present, Cooja ignores and overrides them.
+ * */
+enum {
+    /*
+     * Tmote Sky (with CC2420 radio) gives value -100dB
+     * CC1310 gives about -110dB
+    */
+    RSSI_NO_SIGNAL = -110,
+
+    /*
+     * Tmote Sky (with CC2420 radio) gives value 105
+     * CC1310 gives about 100
+    */
+    LQI_NO_SIGNAL  = 100,
+};
 
 /* COOJA */
 char simReceiving = 0;
@@ -65,11 +83,14 @@ rtimer_clock_t simLastPacketTimestamp = 0;
 char simOutDataBuffer[COOJA_RADIO_BUFSIZE];
 int simOutSize = 0;
 char simRadioHWOn = 1;
-int simSignalStrength = -100;
-int simLastSignalStrength = -100;
+int simSignalStrength       = RSSI_NO_SIGNAL;
+int simLastSignalStrength   = RSSI_NO_SIGNAL;
 char simPower = 100;
-int simRadioChannel = 26;
-int simLQI = 105;
+int simRadioChannel = MAX_CHANNEL;
+int simLQI      = LQI_NO_SIGNAL;
+int simLastLQI  = LQI_NO_SIGNAL;
+
+
 
 static const void *pending_data;
 
@@ -135,10 +156,18 @@ radio_LQI(void)
 {
   return simLQI;
 }
+
+static
+int radio_lqi_last(void)
+{
+  return simLastLQI;
+}
+
 /*---------------------------------------------------------------------------*/
 static int
 radio_on(void)
 {
+  ENERGEST_ON(ENERGEST_TYPE_LISTEN);
   simRadioHWOn = 1;
   return 1;
 }
@@ -146,6 +175,7 @@ radio_on(void)
 static int
 radio_off(void)
 {
+  ENERGEST_OFF(ENERGEST_TYPE_LISTEN);
   simRadioHWOn = 0;
   return 1;
 }
@@ -159,17 +189,13 @@ doInterfaceActionsBeforeTick(void)
   }
   if(simReceiving) {
     simLastSignalStrength = simSignalStrength;
+    simLastLQI              = simLQI;
     return;
   }
 
   if(simInSize > 0) {
     process_poll(&cooja_radio_process);
   }
-}
-/*---------------------------------------------------------------------------*/
-static void
-doInterfaceActionsAfterTick(void)
-{
 }
 /*---------------------------------------------------------------------------*/
 static int
@@ -188,8 +214,8 @@ radio_read(void *buf, unsigned short bufsize)
   memcpy(buf, simInDataBuffer, simInSize);
   simInSize = 0;
   if(!poll_mode) {
-    packetbuf_set_attr(PACKETBUF_ATTR_RSSI, simSignalStrength);
-    packetbuf_set_attr(PACKETBUF_ATTR_LINK_QUALITY, simLQI);
+    packetbuf_set_attr(PACKETBUF_ATTR_RSSI, radio_signal_strength_last());
+    packetbuf_set_attr(PACKETBUF_ATTR_LINK_QUALITY, radio_lqi_last() );
   }
 
   return tmp;
@@ -207,22 +233,9 @@ channel_clear(void)
 static int
 radio_send(const void *payload, unsigned short payload_len)
 {
-  int radiostate = simRadioHWOn;
+  int result;
+  int radio_was_on = simRadioHWOn;
 
-  /* Simulate turnaround time of 2ms for packets, 1ms for acks*/
-#if COOJA_SIMULATE_TURNAROUND
-  simProcessRunValue = 1;
-  cooja_mt_yield();
-  if(payload_len > 3) {
-    simProcessRunValue = 1;
-    cooja_mt_yield();
-  }
-#endif /* COOJA_SIMULATE_TURNAROUND */
-
-  if(!simRadioHWOn) {
-    /* Turn on radio temporarily */
-    simRadioHWOn = 1;
-  }
   if(payload_len > COOJA_RADIO_BUFSIZE) {
     return RADIO_TX_ERR;
   }
@@ -233,24 +246,47 @@ radio_send(const void *payload, unsigned short payload_len)
     return RADIO_TX_ERR;
   }
 
-  /* Transmit on CCA */
-#if COOJA_TRANSMIT_ON_CCA
-  if(send_on_cca && !channel_clear()) {
-    return RADIO_TX_COLLISION;
+  if(radio_was_on) {
+    ENERGEST_SWITCH(ENERGEST_TYPE_LISTEN, ENERGEST_TYPE_TRANSMIT);
+  } else {
+    /* Turn on radio temporarily */
+    simRadioHWOn = 1;
+    ENERGEST_ON(ENERGEST_TYPE_TRANSMIT);
   }
-#endif /* COOJA_TRANSMIT_ON_CCA */
 
-  /* Copy packet data to temporary storage */
-  memcpy(simOutDataBuffer, payload, payload_len);
-  simOutSize = payload_len;
-
-  /* Transmit */
-  while(simOutSize > 0) {
+#if COOJA_SIMULATE_TURNAROUND
+  simProcessRunValue = 1;
+  cooja_mt_yield();
+  if(payload_len > 3) {
+    simProcessRunValue = 1;
     cooja_mt_yield();
   }
+#endif /* COOJA_SIMULATE_TURNAROUND */
 
-  simRadioHWOn = radiostate;
-  return RADIO_TX_OK;
+  /* Transmit on CCA */
+  if(COOJA_TRANSMIT_ON_CCA && send_on_cca && !channel_clear()) {
+    result = RADIO_TX_COLLISION;
+  } else {
+    /* Copy packet data to temporary storage */
+    memcpy(simOutDataBuffer, payload, payload_len);
+    simOutSize = payload_len;
+
+    /* Transmit */
+    while(simOutSize > 0) {
+      cooja_mt_yield();
+    }
+
+    result = RADIO_TX_OK;
+  }
+
+  if(radio_was_on) {
+    ENERGEST_SWITCH(ENERGEST_TYPE_TRANSMIT, ENERGEST_TYPE_LISTEN);
+  } else {
+    ENERGEST_OFF(ENERGEST_TYPE_TRANSMIT);
+  }
+
+  simRadioHWOn = radio_was_on;
+  return result;
 }
 /*---------------------------------------------------------------------------*/
 static int
@@ -338,17 +374,28 @@ get_value(radio_param_t param, radio_value_t *value)
     }
     return RADIO_RESULT_OK;
   case RADIO_PARAM_LAST_RSSI:
-    *value = simSignalStrength;
+    *value = radio_signal_strength_last();
     return RADIO_RESULT_OK;
+
   case RADIO_PARAM_LAST_LINK_QUALITY:
-    *value = simLQI;
+    *value = radio_lqi_last();
     return RADIO_RESULT_OK;
+
   case RADIO_PARAM_RSSI:
-    /* return a fixed value depending on the channel */
-    *value = -90 + simRadioChannel - 11;
+    *value = radio_signal_strength_current();
     return RADIO_RESULT_OK;
+
   case RADIO_CONST_MAX_PAYLOAD_LEN:
     *value = (radio_value_t)COOJA_RADIO_BUFSIZE;
+    return RADIO_RESULT_OK;
+  case RADIO_PARAM_CHANNEL:
+    *value = simRadioChannel;
+    return RADIO_RESULT_OK;
+  case RADIO_CONST_CHANNEL_MIN:
+    *value = MIN_CHANNEL;
+    return RADIO_RESULT_OK;
+  case RADIO_CONST_CHANNEL_MAX:
+    *value = MAX_CHANNEL;
     return RADIO_RESULT_OK;
   default:
     return RADIO_RESULT_NOT_SUPPORTED;
@@ -386,9 +433,12 @@ set_value(radio_param_t param, radio_value_t value)
     set_send_on_cca((value & RADIO_TX_MODE_SEND_ON_CCA) != 0);
     return RADIO_RESULT_OK;
   case RADIO_PARAM_CHANNEL:
-    if(value < 11 || value > 26) {
-      return RADIO_RESULT_INVALID_VALUE;
-    }
+    /* With channel value < 0 Cooja matches any channels:
+     *  - send packets on a negative channel -> to any receiver's channels.
+     *  - receive on a negative channel <- get packets from any sender's channels.
+     * So, negative channel are useful for wide-band noise generation.
+     * Or for wide-band sniffing.
+     * */
     radio_set_channel(value);
     return RADIO_RESULT_OK;
   default:
@@ -433,6 +483,4 @@ const struct radio_driver cooja_radio_driver =
     set_object
 };
 /*---------------------------------------------------------------------------*/
-SIM_INTERFACE(radio_interface,
-              doInterfaceActionsBeforeTick,
-              doInterfaceActionsAfterTick);
+COOJA_PRE_TICK_ACTION(COOJA_RADIO_INIT_PRIO, doInterfaceActionsBeforeTick)

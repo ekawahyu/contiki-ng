@@ -32,7 +32,7 @@
 
 /**
  * \file
- *         6lowpan implementation (RFC4944 and draft-ietf-6lowpan-hc-06)
+ *         6LoWPAN implementation (RFC 4944 and RFC 6282)
  *
  * \author Adam Dunkels <adam@sics.se>
  * \author Nicolas Tsiftes <nvt@sics.se>
@@ -50,7 +50,7 @@
  */
 
 /**
- * FOR HC-06 COMPLIANCE TODO:
+ * FOR RFC 6282 COMPLIANCE TODO:
  * -Add compression options to UDP, currently only supports
  *  both ports compressed or both ports elided
  *
@@ -81,10 +81,10 @@
 #define LOG_MODULE "6LoWPAN"
 #define LOG_LEVEL LOG_LEVEL_6LOWPAN
 
-#define GET16(ptr,index) (((uint16_t)((ptr)[index] << 8)) | ((ptr)[(index) + 1]))
+#define GET16(ptr,index) (((uint16_t)((ptr)[(index)] << 8)) | ((ptr)[(index) + 1]))
 #define SET16(ptr,index,value) do {     \
-  (ptr)[index] = ((value) >> 8) & 0xff; \
-  (ptr)[index + 1] = (value) & 0xff;    \
+  (ptr)[(index)] = ((value) >> 8) & 0xff; \
+  (ptr)[(index) + 1] = (value) & 0xff;    \
 } while(0)
 
 /** \name Pointers in the packetbuf buffer
@@ -112,6 +112,8 @@
 #define PACKETBUF_6LO_HC_UDP_PORTS         4 /* 8 bit */
 #define PACKETBUF_6LO_HC_UDP_CHKSUM        5 /* 16 bit */
 
+/** @} */
+
 /** \name Pointers in the sicslowpan and uip buffer
  *  @{
  */
@@ -123,6 +125,7 @@
 
 #define UIP_IPPAYLOAD_BUF_POS(pos)         (&uip_buf[UIP_IPH_LEN + (pos)])
 #define UIP_UDP_BUF_POS(pos)               ((struct uip_udp_hdr *)UIP_IPPAYLOAD_BUF_POS(pos))
+#define UIP_EXT_HDR_LEN                    2
 
 /** @} */
 
@@ -192,9 +195,6 @@ static uint8_t curr_page;
 static int last_tx_status;
 /** @} */
 
-
-static int last_rssi;
-
 /* ----------------------------------------------------------------- */
 /* Support for reassembling multiple packets                         */
 /* ----------------------------------------------------------------- */
@@ -243,8 +243,6 @@ static uint16_t my_tag;
 struct sicslowpan_frag_info {
   /** When reassembling, the source address of the fragments being merged */
   linkaddr_t sender;
-  /** The destination address of the fragments being merged */
-  linkaddr_t receiver;
   /** When reassembling, the tag in the fragments being merged. */
   uint16_t tag;
   /** Total length of the fragmented packet */
@@ -315,7 +313,7 @@ store_fragment(uint8_t index, uint8_t offset)
 
   len = packetbuf_datalen() - packetbuf_hdr_len;
 
-  if(len < 0 || len > SICSLOWPAN_FRAGMENT_SIZE) {
+  if(len <= 0 || len > SICSLOWPAN_FRAGMENT_SIZE) {
     /* Unacceptable fragment size. */
     return -1;
   }
@@ -434,7 +432,7 @@ copy_frags2uip(int context)
   for(i = 0; i < SICSLOWPAN_FRAGMENT_BUFFERS; i++) {
     /* And also copy all matching fragments */
     if(frag_buf[i].len > 0 && frag_buf[i].index == context) {
-      if((frag_buf[i].offset << 3) + frag_buf[i].len > sizeof(uip_buf)) {
+      if(((size_t)frag_buf[i].offset << 3) + frag_buf[i].len > sizeof(uip_buf)) {
         LOG_WARN("input: invalid fragment offset\n");
         clear_fragments(context);
         return false;
@@ -502,7 +500,7 @@ set_packet_attrs(void)
 
 
 #if SICSLOWPAN_COMPRESSION >= SICSLOWPAN_COMPRESSION_IPHC
-/** \name variables specific to HC06 and more recent versions
+/** \name variables specific to RFC 6282
  *  @{
  */
 
@@ -512,11 +510,8 @@ static struct sicslowpan_addr_context
 addr_contexts[SICSLOWPAN_CONF_MAX_ADDR_CONTEXTS];
 #endif
 
-/** pointer to an address context. */
-static struct sicslowpan_addr_context *context;
-
 /** pointer to the byte where to write next inline field. */
-static uint8_t *hc06_ptr;
+static uint8_t *iphc_ptr;
 
 /* Uncompression of linklocal */
 /*   0 -> 16 bytes from packet  */
@@ -547,6 +542,7 @@ const uint8_t llprefix[] = {0xfe, 0x80};
 /* TTL uncompression values */
 static const uint8_t ttl_values[] = {0, 1, 64, 255};
 
+/** @} */
 /*--------------------------------------------------------------------*/
 /** \name IPHC related functions
  * @{                                                                 */
@@ -586,19 +582,20 @@ addr_context_lookup_by_number(uint8_t number)
 }
 /*--------------------------------------------------------------------*/
 static uint8_t
-compress_addr_64(uint8_t bitpos, uip_ipaddr_t *ipaddr, uip_lladdr_t *lladdr)
+compress_addr_64(uint8_t bitpos, uip_ipaddr_t *ipaddr,
+    const uip_lladdr_t *lladdr)
 {
   if(uip_is_addr_mac_addr_based(ipaddr, lladdr)) {
     return 3 << bitpos; /* 0-bits */
   } else if(sicslowpan_is_iid_16_bit_compressable(ipaddr)) {
     /* compress IID to 16 bits xxxx::0000:00ff:fe00:XXXX */
-    memcpy(hc06_ptr, &ipaddr->u16[7], 2);
-    hc06_ptr += 2;
+    memcpy(iphc_ptr, &ipaddr->u16[7], 2);
+    iphc_ptr += 2;
     return 2 << bitpos; /* 16-bits */
   } else {
     /* do not compress IID => xxxx::IID */
-    memcpy(hc06_ptr, &ipaddr->u16[4], 8);
-    hc06_ptr += 8;
+    memcpy(iphc_ptr, &ipaddr->u16[4], 8);
+    iphc_ptr += 8;
     return 1 << bitpos; /* 64-bits */
   }
 }
@@ -610,7 +607,7 @@ compress_addr_64(uint8_t bitpos, uip_ipaddr_t *ipaddr, uip_lladdr_t *lladdr)
  * pref_post_count takes a byte where the first nibble specify prefix count
  * and the second postfix count (NOTE: 15/0xf => 16 bytes copy).
  */
-static void
+static bool
 uncompress_addr(uip_ipaddr_t *ipaddr, uint8_t const prefix[],
                 uint8_t pref_post_count, uip_lladdr_t *lladdr)
 {
@@ -622,20 +619,25 @@ uncompress_addr(uip_ipaddr_t *ipaddr, uint8_t const prefix[],
 
   LOG_DBG("uncompression: address %d %d ", prefcount, postcount);
 
-  if(prefcount > 0) {
+  if(prefix != NULL) {
     memcpy(ipaddr, prefix, prefcount);
   }
   if(prefcount + postcount < 16) {
     memset(&ipaddr->u8[prefcount], 0, 16 - (prefcount + postcount));
   }
   if(postcount > 0) {
-    memcpy(&ipaddr->u8[16 - postcount], hc06_ptr, postcount);
+    if((iphc_ptr - packetbuf_ptr) + postcount > packetbuf_datalen()) {
+      LOG_WARN("Insufficient packet data to decompress IP address\n");
+      return false;
+    }
+
+    memcpy(&ipaddr->u8[16 - postcount], iphc_ptr, postcount);
     if(postcount == 2 && prefcount < 11) {
       /* 16 bits uncompression => 0000:00ff:fe00:XXXX */
       ipaddr->u8[11] = 0xff;
       ipaddr->u8[12] = 0xfe;
     }
-    hc06_ptr += postcount;
+    iphc_ptr += postcount;
   } else if (prefcount > 0) {
     /* no IID based configuration if no prefix and no data => unspec */
     uip_ds6_set_addr_iid(ipaddr, lladdr);
@@ -643,6 +645,7 @@ uncompress_addr(uip_ipaddr_t *ipaddr, uint8_t const prefix[],
 
   LOG_DBG_6ADDR(ipaddr);
   LOG_DBG_("\n");
+  return true;
 }
 
 /*--------------------------------------------------------------------*/
@@ -677,12 +680,10 @@ uncompress_addr(uip_ipaddr_t *ipaddr, uint8_t const prefix[],
  * \note The context number 00 is reserved for the link local prefix.
  * For unicast addresses, if we cannot compress the prefix, we neither
  * compress the IID.
- * \param link_destaddr L2 destination address, needed to compress IP
- * dest
  * \return 1 if success, else 0
  */
 static int
-compress_hdr_iphc(linkaddr_t *link_destaddr)
+compress_hdr_iphc(void)
 {
   uint8_t tmp, iphc0, iphc1, *next_hdr, *next_nhc;
   int ext_hdr_len;
@@ -701,14 +702,14 @@ compress_hdr_iphc(linkaddr_t *link_destaddr)
 /* Macro used only internally, during header compression. Checks if there
  * is sufficient space in packetbuf before writing any further. */
 #define CHECK_BUFFER_SPACE(writelen) do { \
-  if(hc06_ptr + (writelen) >= PACKETBUF_PAYLOAD_END) { \
+  if(iphc_ptr + (writelen) >= PACKETBUF_PAYLOAD_END) { \
     LOG_WARN("Not enough packetbuf space to compress header (%u bytes, %u left). Aborting.\n", \
-                (unsigned)(writelen), (unsigned)(PACKETBUF_PAYLOAD_END - hc06_ptr)); \
+                (unsigned)(writelen), (unsigned)(PACKETBUF_PAYLOAD_END - iphc_ptr)); \
     return 0; \
   } \
 } while(0);
 
-  hc06_ptr = PACKETBUF_IPHC_BUF + 2;
+  iphc_ptr = PACKETBUF_IPHC_BUF + 2;
 
   /* Check if there is enough space for the compressed IPv6 header, in the
    * worst case (least compressed case). Extension headers and transport
@@ -734,14 +735,15 @@ compress_hdr_iphc(linkaddr_t *link_destaddr)
 
 
   /* check if dest context exists (for allocating third byte) */
-  /* TODO: fix this so that it remembers the looked up values for
-     avoiding two lookups - or set the lookup values immediately */
-  if(addr_context_lookup_by_prefix(&UIP_IP_BUF->destipaddr) != NULL ||
-     addr_context_lookup_by_prefix(&UIP_IP_BUF->srcipaddr) != NULL) {
-    /* set context flag and increase hc06_ptr */
+  struct sicslowpan_addr_context *source_context =
+      addr_context_lookup_by_prefix(&UIP_IP_BUF->srcipaddr);
+  struct sicslowpan_addr_context *destination_context =
+      addr_context_lookup_by_prefix(&UIP_IP_BUF->destipaddr);
+  if(source_context || destination_context) {
+    /* set context flag and increase iphc_ptr */
     LOG_DBG("compression: dest or src ipaddr - setting CID\n");
     iphc1 |= SICSLOWPAN_IPHC_CID;
-    hc06_ptr++;
+    iphc_ptr++;
   }
 
   /*
@@ -766,8 +768,8 @@ compress_hdr_iphc(linkaddr_t *link_destaddr)
       iphc0 |= SICSLOWPAN_IPHC_TC_C;
     } else {
       /* compress only the flow label */
-     *hc06_ptr = tmp;
-      hc06_ptr += 1;
+     *iphc_ptr = tmp;
+      iphc_ptr += 1;
     }
   } else {
     /* Flow label cannot be compressed */
@@ -775,16 +777,16 @@ compress_hdr_iphc(linkaddr_t *link_destaddr)
        ((UIP_IP_BUF->tcflow & 0xF0) == 0)) {
       /* compress only traffic class */
       iphc0 |= SICSLOWPAN_IPHC_TC_C;
-      *hc06_ptr = (tmp & 0xc0) |
+      *iphc_ptr = (tmp & 0xc0) |
         (UIP_IP_BUF->tcflow & 0x0F);
-      memcpy(hc06_ptr + 1, &UIP_IP_BUF->flow, 2);
-      hc06_ptr += 3;
+      memcpy(iphc_ptr + 1, &UIP_IP_BUF->flow, 2);
+      iphc_ptr += 3;
     } else {
       /* compress nothing */
-      memcpy(hc06_ptr, &UIP_IP_BUF->vtc, 4);
+      memcpy(iphc_ptr, &UIP_IP_BUF->vtc, 4);
       /* but replace the top byte with the new ECN | DSCP format*/
-      *hc06_ptr = tmp;
-      hc06_ptr += 4;
+      *iphc_ptr = tmp;
+      iphc_ptr += 4;
    }
   }
 
@@ -797,8 +799,8 @@ compress_hdr_iphc(linkaddr_t *link_destaddr)
 
   /* Add proto header unless it is compressed */
   if((iphc0 & SICSLOWPAN_IPHC_NH_C) == 0) {
-    *hc06_ptr = UIP_IP_BUF->proto;
-    hc06_ptr += 1;
+    *iphc_ptr = UIP_IP_BUF->proto;
+    iphc_ptr += 1;
   }
 
   /*
@@ -819,8 +821,8 @@ compress_hdr_iphc(linkaddr_t *link_destaddr)
       iphc0 |= SICSLOWPAN_IPHC_TTL_255;
       break;
     default:
-      *hc06_ptr = UIP_IP_BUF->ttl;
-      hc06_ptr += 1;
+      *iphc_ptr = UIP_IP_BUF->ttl;
+      iphc_ptr += 1;
       break;
   }
 
@@ -829,13 +831,12 @@ compress_hdr_iphc(linkaddr_t *link_destaddr)
     LOG_DBG("compression: addr unspecified - setting SAC\n");
     iphc1 |= SICSLOWPAN_IPHC_SAC;
     iphc1 |= SICSLOWPAN_IPHC_SAM_00;
-  } else if((context = addr_context_lookup_by_prefix(&UIP_IP_BUF->srcipaddr))
-     != NULL) {
+  } else if(source_context) {
     /* elide the prefix - indicate by CID and set context + SAC */
     LOG_DBG("compression: src with context - setting CID & SAC ctx: %d\n",
-           context->number);
+           source_context->number);
     iphc1 |= SICSLOWPAN_IPHC_CID | SICSLOWPAN_IPHC_SAC;
-    PACKETBUF_IPHC_BUF[2] |= context->number << 4;
+    PACKETBUF_IPHC_BUF[2] |= source_context->number << 4;
     /* compession compare with this nodes address (source) */
 
     iphc1 |= compress_addr_64(SICSLOWPAN_IPHC_SAM_BIT,
@@ -850,8 +851,8 @@ compress_hdr_iphc(linkaddr_t *link_destaddr)
   } else {
     /* send the full address => SAC = 0, SAM = 00 */
     iphc1 |= SICSLOWPAN_IPHC_SAM_00; /* 128-bits */
-    memcpy(hc06_ptr, &UIP_IP_BUF->srcipaddr.u16[0], 16);
-    hc06_ptr += 16;
+    memcpy(iphc_ptr, &UIP_IP_BUF->srcipaddr.u16[0], 16);
+    iphc_ptr += 16;
   }
 
   /* dest address*/
@@ -861,49 +862,50 @@ compress_hdr_iphc(linkaddr_t *link_destaddr)
     if(sicslowpan_is_mcast_addr_compressable8(&UIP_IP_BUF->destipaddr)) {
       iphc1 |= SICSLOWPAN_IPHC_DAM_11;
       /* use last byte */
-      *hc06_ptr = UIP_IP_BUF->destipaddr.u8[15];
-      hc06_ptr += 1;
+      *iphc_ptr = UIP_IP_BUF->destipaddr.u8[15];
+      iphc_ptr += 1;
     } else if(sicslowpan_is_mcast_addr_compressable32(&UIP_IP_BUF->destipaddr)) {
       iphc1 |= SICSLOWPAN_IPHC_DAM_10;
       /* second byte + the last three */
-      *hc06_ptr = UIP_IP_BUF->destipaddr.u8[1];
-      memcpy(hc06_ptr + 1, &UIP_IP_BUF->destipaddr.u8[13], 3);
-      hc06_ptr += 4;
+      *iphc_ptr = UIP_IP_BUF->destipaddr.u8[1];
+      memcpy(iphc_ptr + 1, &UIP_IP_BUF->destipaddr.u8[13], 3);
+      iphc_ptr += 4;
     } else if(sicslowpan_is_mcast_addr_compressable48(&UIP_IP_BUF->destipaddr)) {
       iphc1 |= SICSLOWPAN_IPHC_DAM_01;
       /* second byte + the last five */
-      *hc06_ptr = UIP_IP_BUF->destipaddr.u8[1];
-      memcpy(hc06_ptr + 1, &UIP_IP_BUF->destipaddr.u8[11], 5);
-      hc06_ptr += 6;
+      *iphc_ptr = UIP_IP_BUF->destipaddr.u8[1];
+      memcpy(iphc_ptr + 1, &UIP_IP_BUF->destipaddr.u8[11], 5);
+      iphc_ptr += 6;
     } else {
       iphc1 |= SICSLOWPAN_IPHC_DAM_00;
       /* full address */
-      memcpy(hc06_ptr, &UIP_IP_BUF->destipaddr.u8[0], 16);
-      hc06_ptr += 16;
+      memcpy(iphc_ptr, &UIP_IP_BUF->destipaddr.u8[0], 16);
+      iphc_ptr += 16;
     }
   } else {
     /* Address is unicast, try to compress */
-    if((context = addr_context_lookup_by_prefix(&UIP_IP_BUF->destipaddr)) != NULL) {
+    if(destination_context) {
       /* elide the prefix */
       iphc1 |= SICSLOWPAN_IPHC_DAC;
-      PACKETBUF_IPHC_BUF[2] |= context->number;
+      PACKETBUF_IPHC_BUF[2] |= destination_context->number;
       /* compession compare with link adress (destination) */
 
       iphc1 |= compress_addr_64(SICSLOWPAN_IPHC_DAM_BIT,
-                                &UIP_IP_BUF->destipaddr,
-                                (uip_lladdr_t *)link_destaddr);
+          &UIP_IP_BUF->destipaddr,
+          (const uip_lladdr_t *)packetbuf_addr(PACKETBUF_ADDR_RECEIVER));
       /* No context found for this address */
     } else if(uip_is_addr_linklocal(&UIP_IP_BUF->destipaddr) &&
               UIP_IP_BUF->destipaddr.u16[1] == 0 &&
               UIP_IP_BUF->destipaddr.u16[2] == 0 &&
               UIP_IP_BUF->destipaddr.u16[3] == 0) {
       iphc1 |= compress_addr_64(SICSLOWPAN_IPHC_DAM_BIT,
-               &UIP_IP_BUF->destipaddr, (uip_lladdr_t *)link_destaddr);
+          &UIP_IP_BUF->destipaddr,
+          (const uip_lladdr_t *)packetbuf_addr(PACKETBUF_ADDR_RECEIVER));
     } else {
       /* send the full address */
       iphc1 |= SICSLOWPAN_IPHC_DAM_00; /* 128-bits */
-      memcpy(hc06_ptr, &UIP_IP_BUF->destipaddr.u16[0], 16);
-      hc06_ptr += 16;
+      memcpy(iphc_ptr, &UIP_IP_BUF->destipaddr.u16[0], 16);
+      iphc_ptr += 16;
     }
   }
 
@@ -912,7 +914,7 @@ compress_hdr_iphc(linkaddr_t *link_destaddr)
   /* Start of ext hdr compression or UDP compression */
   /* pick out the next-header position */
   next_hdr = &UIP_IP_BUF->proto;
-  next_nhc = hc06_ptr; /* here we set the next header is compressed. */
+  next_nhc = iphc_ptr; /* here we set the next header is compressed. */
   ext_hdr_len = 0;
   /* reserve the write place of this next header position */
   LOG_DBG("compression: first header: %d\n", *next_hdr);
@@ -944,18 +946,18 @@ compress_hdr_iphc(linkaddr_t *link_destaddr)
            next not being elided in that case. */
         if(!IS_COMPRESSABLE_PROTO(*next_hdr)) {
           CHECK_BUFFER_SPACE(1);
-          hc06_ptr++;
+          iphc_ptr++;
           LOG_DBG("compression: keeping the next header in this ext hdr: %d\n",
                  ext_hdr->next);
         }
         /* copy the ext-hdr into the hc06 buffer */
         CHECK_BUFFER_SPACE(len);
-        memcpy(hc06_ptr, ext_hdr, len);
+        memcpy(iphc_ptr, ext_hdr, len);
         /* modify the len to octets */
-        ext_hdr = (struct uip_ext_hdr *) hc06_ptr;
+        ext_hdr = (struct uip_ext_hdr *) iphc_ptr;
         ext_hdr->len = len - 2; /* Len should be in bytes from len byte*/
         ext_hdr_len += len;
-        hc06_ptr += len;
+        iphc_ptr += len;
         uncomp_hdr_len += len;
 
         /* Write this next header - with its NHC header - including flag
@@ -964,12 +966,12 @@ compress_hdr_iphc(linkaddr_t *link_destaddr)
           (IS_COMPRESSABLE_PROTO(*next_hdr) ? SICSLOWPAN_NHC_BIT : 0) |
           (proto << 1);
         /* update the position of the next header */
-        next_nhc = hc06_ptr;
+        next_nhc = iphc_ptr;
       }
       break;
     case UIP_PROTO_UDP:
       /* allocate a byte for the next header posision as UDP has no next */
-      hc06_ptr++;
+      iphc_ptr++;
       udp_buf = UIP_UDP_BUF_POS(ext_hdr_len);
       LOG_DBG("compression: inlined UDP ports on send side: %x, %x\n",
              UIP_HTONS(udp_buf->srcport), UIP_HTONS(udp_buf->destport));
@@ -980,44 +982,44 @@ compress_hdr_iphc(linkaddr_t *link_destaddr)
         *next_nhc = SICSLOWPAN_NHC_UDP_CS_P_11;
         LOG_DBG("IPHC: remove 12 b of both source & dest with prefix 0xFOB\n");
         CHECK_BUFFER_SPACE(1);
-        *hc06_ptr =
+        *iphc_ptr =
           (uint8_t)((UIP_HTONS(udp_buf->srcport) -
                      SICSLOWPAN_UDP_4_BIT_PORT_MIN) << 4) +
           (uint8_t)((UIP_HTONS(udp_buf->destport) -
                      SICSLOWPAN_UDP_4_BIT_PORT_MIN));
-        hc06_ptr += 1;
+        iphc_ptr += 1;
       } else if((UIP_HTONS(udp_buf->destport) & 0xff00) == SICSLOWPAN_UDP_8_BIT_PORT_MIN) {
         /* we can compress 8 bits of dest, leave source. */
         *next_nhc = SICSLOWPAN_NHC_UDP_CS_P_01;
         LOG_DBG("IPHC: leave source, remove 8 bits of dest with prefix 0xF0\n");
         CHECK_BUFFER_SPACE(3);
-        memcpy(hc06_ptr, &udp_buf->srcport, 2);
-        *(hc06_ptr + 2) =
+        memcpy(iphc_ptr, &udp_buf->srcport, 2);
+        *(iphc_ptr + 2) =
           (uint8_t)((UIP_HTONS(udp_buf->destport) -
                      SICSLOWPAN_UDP_8_BIT_PORT_MIN));
-        hc06_ptr += 3;
+        iphc_ptr += 3;
       } else if((UIP_HTONS(udp_buf->srcport) & 0xff00) == SICSLOWPAN_UDP_8_BIT_PORT_MIN) {
         /* we can compress 8 bits of src, leave dest. Copy compressed port */
         *next_nhc = SICSLOWPAN_NHC_UDP_CS_P_10;
         LOG_DBG("IPHC: remove 8 bits of source with prefix 0xF0, leave dest. hch: %i\n", *next_nhc);
         CHECK_BUFFER_SPACE(3);
-        *hc06_ptr =
+        *iphc_ptr =
           (uint8_t)((UIP_HTONS(udp_buf->srcport) -
                      SICSLOWPAN_UDP_8_BIT_PORT_MIN));
-        memcpy(hc06_ptr + 1, &udp_buf->destport, 2);
-        hc06_ptr += 3;
+        memcpy(iphc_ptr + 1, &udp_buf->destport, 2);
+        iphc_ptr += 3;
       } else {
         /* we cannot compress. Copy uncompressed ports, full checksum  */
         *next_nhc = SICSLOWPAN_NHC_UDP_CS_P_00;
         LOG_DBG("IPHC: cannot compress UDP headers\n");
         CHECK_BUFFER_SPACE(4);
-        memcpy(hc06_ptr, &udp_buf->srcport, 4);
-        hc06_ptr += 4;
+        memcpy(iphc_ptr, &udp_buf->srcport, 4);
+        iphc_ptr += 4;
       }
       /* always inline the checksum  */
       CHECK_BUFFER_SPACE(2);
-      memcpy(hc06_ptr, &udp_buf->udpchksum, 2);
-      hc06_ptr += 2;
+      memcpy(iphc_ptr, &udp_buf->udpchksum, 2);
+      iphc_ptr += 2;
       uncomp_hdr_len += UIP_UDPH_LEN;
       /* this is the final header. */
       next_hdr = NULL;
@@ -1037,15 +1039,15 @@ compress_hdr_iphc(linkaddr_t *link_destaddr)
 
   if(LOG_DBG_ENABLED) {
     uint16_t ndx;
-    LOG_DBG("compression: after (%d): ", (int)(hc06_ptr - packetbuf_ptr));
-    for(ndx = 0; ndx < hc06_ptr - packetbuf_ptr; ndx++) {
+    LOG_DBG("compression: after (%d): ", (int)(iphc_ptr - packetbuf_ptr));
+    for(ndx = 0; ndx < iphc_ptr - packetbuf_ptr; ndx++) {
       uint8_t data = ((uint8_t *) packetbuf_ptr)[ndx];
       LOG_DBG_("%02x", data);
     }
     LOG_DBG_("\n");
   }
 
-  packetbuf_hdr_len = hc06_ptr - packetbuf_ptr;
+  packetbuf_hdr_len = iphc_ptr - packetbuf_ptr;
 
   return 1;
 }
@@ -1063,21 +1065,37 @@ compress_hdr_iphc(linkaddr_t *link_destaddr)
  * are set to the appropriate values
  *
  * \param buf Pointer to the buffer to uncompress the packet into.
+ * \param buf_size The size of the buffer to uncompress the packet into.
  * \param ip_len Equal to 0 if the packet is not a fragment (IP length
  * is then inferred from the L2 length), non 0 if the packet is a 1st
  * fragment.
+ * \return A boolean value indicating whether the uncompression succeeded.
  */
-static void
-uncompress_hdr_iphc(uint8_t *buf, uint16_t ip_len)
+static bool
+uncompress_hdr_iphc(uint8_t *buf, uint16_t buf_size, uint16_t ip_len)
 {
   uint8_t tmp, iphc0, iphc1, nhc;
   struct uip_ext_hdr *exthdr;
   uint8_t* last_nextheader;
   uint8_t* ip_payload;
   uint8_t ext_hdr_len = 0;
+  uint16_t cmpr_len;
+
+/* Macro used only internally, during header uncompression. Checks if there
+ * is sufficient space in packetbuf before reading any further. */
+#define CHECK_READ_SPACE(readlen) \
+  if((iphc_ptr - packetbuf_ptr) + (readlen) > cmpr_len) { \
+    LOG_WARN("Not enough packetbuf space to decompress header (%u bytes, %u left). Aborting.\n", \
+             (unsigned)(readlen), (unsigned)(cmpr_len - (iphc_ptr - packetbuf_ptr))); \
+    return false; \
+  }
 
   /* at least two byte will be used for the encoding */
-  hc06_ptr = packetbuf_ptr + packetbuf_hdr_len + 2;
+  cmpr_len = packetbuf_datalen();
+  if(cmpr_len < packetbuf_hdr_len + 2) {
+    return false;
+  }
+  iphc_ptr = packetbuf_ptr + packetbuf_hdr_len + 2;
 
   iphc0 = PACKETBUF_IPHC_BUF[0];
   iphc1 = PACKETBUF_IPHC_BUF[1];
@@ -1085,7 +1103,7 @@ uncompress_hdr_iphc(uint8_t *buf, uint16_t ip_len)
   /* another if the CID flag is set */
   if(iphc1 & SICSLOWPAN_IPHC_CID) {
     LOG_DBG("uncompression: CID flag set - increase header with one\n");
-    hc06_ptr++;
+    iphc_ptr++;
   }
 
   /* Traffic class and flow label */
@@ -1093,9 +1111,10 @@ uncompress_hdr_iphc(uint8_t *buf, uint16_t ip_len)
       /* Flow label are carried inline */
       if((iphc0 & SICSLOWPAN_IPHC_TC_C) == 0) {
         /* Traffic class is carried inline */
-        memcpy(&SICSLOWPAN_IP_BUF(buf)->tcflow, hc06_ptr + 1, 3);
-        tmp = *hc06_ptr;
-        hc06_ptr += 4;
+        CHECK_READ_SPACE(4);
+        memcpy(&SICSLOWPAN_IP_BUF(buf)->tcflow, iphc_ptr + 1, 3);
+        tmp = *iphc_ptr;
+        iphc_ptr += 4;
         /* IPHC format of tc is ECN | DSCP , original is DSCP | ECN */
         /* set version, pick highest DSCP bits and set in vtc */
         SICSLOWPAN_IP_BUF(buf)->vtc = 0x60 | ((tmp >> 2) & 0x0f);
@@ -1106,20 +1125,22 @@ uncompress_hdr_iphc(uint8_t *buf, uint16_t ip_len)
         /* Traffic class is compressed (set version and no TC)*/
         SICSLOWPAN_IP_BUF(buf)->vtc = 0x60;
         /* highest flow label bits + ECN bits */
-        SICSLOWPAN_IP_BUF(buf)->tcflow = (*hc06_ptr & 0x0F) |
-          ((*hc06_ptr >> 2) & 0x30);
-        memcpy(&SICSLOWPAN_IP_BUF(buf)->flow, hc06_ptr + 1, 2);
-        hc06_ptr += 3;
+        CHECK_READ_SPACE(3);
+        SICSLOWPAN_IP_BUF(buf)->tcflow = (*iphc_ptr & 0x0F) | 
+          ((*iphc_ptr >> 2) & 0x30);
+        memcpy(&SICSLOWPAN_IP_BUF(buf)->flow, iphc_ptr + 1, 2);
+        iphc_ptr += 3;
       }
     } else {
       /* Version is always 6! */
       /* Version and flow label are compressed */
       if((iphc0 & SICSLOWPAN_IPHC_TC_C) == 0) {
         /* Traffic class is inline */
-        SICSLOWPAN_IP_BUF(buf)->vtc = 0x60 | ((*hc06_ptr >> 2) & 0x0f);
-          SICSLOWPAN_IP_BUF(buf)->tcflow = ((*hc06_ptr << 6) & 0xC0) | ((*hc06_ptr >> 2) & 0x30);
-          SICSLOWPAN_IP_BUF(buf)->flow = 0;
-          hc06_ptr += 1;
+        CHECK_READ_SPACE(1);
+        SICSLOWPAN_IP_BUF(buf)->vtc = 0x60 | ((*iphc_ptr >> 2) & 0x0f);
+        SICSLOWPAN_IP_BUF(buf)->tcflow = ((*iphc_ptr << 6) & 0xC0) | ((*iphc_ptr >> 2) & 0x30);
+        SICSLOWPAN_IP_BUF(buf)->flow = 0;
+        iphc_ptr += 1;
       } else {
         /* Traffic class is compressed */
         SICSLOWPAN_IP_BUF(buf)->vtc = 0x60;
@@ -1131,17 +1152,19 @@ uncompress_hdr_iphc(uint8_t *buf, uint16_t ip_len)
   /* Next Header */
   if((iphc0 & SICSLOWPAN_IPHC_NH_C) == 0) {
     /* Next header is carried inline */
-    SICSLOWPAN_IP_BUF(buf)->proto = *hc06_ptr;
+    CHECK_READ_SPACE(1);
+    SICSLOWPAN_IP_BUF(buf)->proto = *iphc_ptr;
     LOG_DBG("uncompression: next header inline: %d\n", SICSLOWPAN_IP_BUF(buf)->proto);
-    hc06_ptr += 1;
+    iphc_ptr += 1;
   }
 
   /* Hop limit */
   if((iphc0 & 0x03) != SICSLOWPAN_IPHC_TTL_I) {
     SICSLOWPAN_IP_BUF(buf)->ttl = ttl_values[iphc0 & 0x03];
   } else {
-    SICSLOWPAN_IP_BUF(buf)->ttl = *hc06_ptr;
-    hc06_ptr += 1;
+    CHECK_READ_SPACE(1);
+    SICSLOWPAN_IP_BUF(buf)->ttl = *iphc_ptr;
+    iphc_ptr += 1;
   }
 
   /* put the source address compression mode SAM in the tmp var */
@@ -1153,21 +1176,30 @@ uncompress_hdr_iphc(uint8_t *buf, uint16_t ip_len)
       PACKETBUF_IPHC_BUF[2] >> 4 : 0;
 
     /* Source address - check context != NULL only if SAM bits are != 0*/
+    struct sicslowpan_addr_context *source_context;
     if (tmp != 0) {
-      context = addr_context_lookup_by_number(sci);
-      if(context == NULL) {
-        LOG_ERR("uncompression: error context not found\n");
-        return;
+      source_context = addr_context_lookup_by_number(sci);
+      if(!source_context) {
+        LOG_ERR("uncompression: error source context not found\n");
+        return false;
       }
+    } else {
+      source_context = NULL;
     }
     /* if tmp == 0 we do not have a context and therefore no prefix */
-    uncompress_addr(&SICSLOWPAN_IP_BUF(buf)->srcipaddr,
-                    tmp != 0 ? context->prefix : NULL, unc_ctxconf[tmp],
-                    (uip_lladdr_t *)packetbuf_addr(PACKETBUF_ADDR_SENDER));
+    if(!uncompress_addr(&SICSLOWPAN_IP_BUF(buf)->srcipaddr,
+                        source_context ? source_context->prefix : NULL,
+                        unc_ctxconf[tmp],
+                        (uip_lladdr_t *)packetbuf_addr(PACKETBUF_ADDR_SENDER))) {
+      return false;
+    }
   } else {
     /* no compression and link local */
-    uncompress_addr(&SICSLOWPAN_IP_BUF(buf)->srcipaddr, llprefix, unc_llconf[tmp],
-                    (uip_lladdr_t *)packetbuf_addr(PACKETBUF_ADDR_SENDER));
+    if(!uncompress_addr(&SICSLOWPAN_IP_BUF(buf)->srcipaddr, llprefix,
+                        unc_llconf[tmp],
+                        (uip_lladdr_t *)packetbuf_addr(PACKETBUF_ADDR_SENDER))) {
+      return false;
+    }
   }
 
   /* Destination address */
@@ -1187,33 +1219,42 @@ uncompress_hdr_iphc(uint8_t *buf, uint16_t ip_len)
       /* DAM_11:   8 bits FF02::00XX */
       uint8_t prefix[] = {0xff, 0x02};
       if(tmp > 0 && tmp < 3) {
-        prefix[1] = *hc06_ptr;
-        hc06_ptr++;
+        CHECK_READ_SPACE(1);
+        prefix[1] = *iphc_ptr;
+        iphc_ptr++;
       }
 
-      uncompress_addr(&SICSLOWPAN_IP_BUF(buf)->destipaddr, prefix,
-                      unc_mxconf[tmp], NULL);
+      if(!uncompress_addr(&SICSLOWPAN_IP_BUF(buf)->destipaddr, prefix,
+                          unc_mxconf[tmp], NULL)) {
+        return false;
+      }
     }
   } else {
     /* no multicast */
     /* Context based */
     if(iphc1 & SICSLOWPAN_IPHC_DAC) {
       uint8_t dci = (iphc1 & SICSLOWPAN_IPHC_CID) ? PACKETBUF_IPHC_BUF[2] & 0x0f : 0;
-      context = addr_context_lookup_by_number(dci);
+      struct sicslowpan_addr_context *destination_context =
+          addr_context_lookup_by_number(dci);
 
       /* all valid cases below need the context! */
-      if(context == NULL) {
-        LOG_ERR("uncompression: error context not found\n");
-        return;
+      if(!destination_context) {
+        LOG_ERR("uncompression: error destination context not found\n");
+        return false;
       }
-      uncompress_addr(&SICSLOWPAN_IP_BUF(buf)->destipaddr, context->prefix,
-                      unc_ctxconf[tmp],
-                      (uip_lladdr_t *)packetbuf_addr(PACKETBUF_ADDR_RECEIVER));
+      if(!uncompress_addr(&SICSLOWPAN_IP_BUF(buf)->destipaddr,
+                          destination_context->prefix,
+                          unc_ctxconf[tmp],
+                          (uip_lladdr_t *)packetbuf_addr(PACKETBUF_ADDR_RECEIVER))) {
+        return false;
+      }
     } else {
       /* not context based => link local M = 0, DAC = 0 - same as SAC */
-      uncompress_addr(&SICSLOWPAN_IP_BUF(buf)->destipaddr, llprefix,
-                      unc_llconf[tmp],
-                      (uip_lladdr_t *)packetbuf_addr(PACKETBUF_ADDR_RECEIVER));
+      if(!uncompress_addr(&SICSLOWPAN_IP_BUF(buf)->destipaddr, llprefix,
+                          unc_llconf[tmp],
+                          (uip_lladdr_t *)packetbuf_addr(PACKETBUF_ADDR_RECEIVER))) {
+        return false;
+      }
     }
   }
   uncomp_hdr_len += UIP_IPH_LEN;
@@ -1224,24 +1265,27 @@ uncompress_hdr_iphc(uint8_t *buf, uint16_t ip_len)
   last_nextheader =  &SICSLOWPAN_IP_BUF(buf)->proto;
   ip_payload = SICSLOWPAN_IPPAYLOAD_BUF(buf);
 
-  while(nhc && (*hc06_ptr & SICSLOWPAN_NHC_MASK) == SICSLOWPAN_NHC_EXT_HDR) {
-    uint8_t eid = (*hc06_ptr & 0x0e) >> 1;
+  CHECK_READ_SPACE(1);
+  while(nhc && (*iphc_ptr & SICSLOWPAN_NHC_MASK) == SICSLOWPAN_NHC_EXT_HDR) {
+    uint8_t eid = (*iphc_ptr & 0x0e) >> 1;
     /* next header compression flag */
-    uint8_t nh = (*hc06_ptr & 0x01);
+    uint8_t nh = (*iphc_ptr & 0x01);
     uint8_t next = 0;
     uint8_t len;
     uint8_t proto;
 
     nhc = nh;
 
-    hc06_ptr++;
+    iphc_ptr++;
+    CHECK_READ_SPACE(1);
     if(!nh) {
-      next = *hc06_ptr;
-      hc06_ptr++;
+      next = *iphc_ptr;
+      iphc_ptr++;
       LOG_DBG("uncompression: next header is inlined. Next: %d\n", next);
     }
-    len = *hc06_ptr;
-    hc06_ptr++;
+    CHECK_READ_SPACE(1);
+    len = *iphc_ptr;
+    iphc_ptr++;
 
     LOG_DBG("uncompression: found ext header id: %d next: %d len: %d\n", eid, next, len);
     switch(eid) {
@@ -1259,92 +1303,119 @@ uncompress_hdr_iphc(uint8_t *buf, uint16_t ip_len)
       break;
     default:
       LOG_DBG("uncompression: error unsupported ext header\n");
-      return;
+      return false;
     }
     *last_nextheader = proto;
+
+    /* Check that there is enough room to write the extension header. */
+    if((ip_payload - buf) + UIP_EXT_HDR_LEN + len > buf_size) {
+      LOG_WARN("uncompression: cannot write ext header beyond target buffer\n");
+      return false;
+    }
+
     /* uncompress the extension header */
     exthdr = (struct uip_ext_hdr *)ip_payload;
-    exthdr->len = (2 + len) / 8 - 1;
+    exthdr->len = (UIP_EXT_HDR_LEN + len) / 8;
+    if(exthdr->len == 0) {
+      LOG_WARN("Extension header length is below 8\n");
+      return false;
+    }
+    exthdr->len--;
     exthdr->next = next;
     last_nextheader = &exthdr->next;
-    if(ip_len == 0 && (uint8_t *)exthdr - uip_buf + 2 + len > sizeof(uip_buf)) {
-      LOG_DBG("uncompression: ext header points beyond uip buffer boundary\n");
-      return;
-    }
-    memcpy((uint8_t*)exthdr + 2, hc06_ptr, len);
-    hc06_ptr += len;
+
+    /* The loop condition needs to read one byte after the next len bytes in the buffer. */
+    CHECK_READ_SPACE(len + 1);
+    memcpy((uint8_t *)exthdr + UIP_EXT_HDR_LEN, iphc_ptr, len);
+    iphc_ptr += len;
+
     uncomp_hdr_len += (exthdr->len + 1) * 8;
     ip_payload += (exthdr->len + 1) * 8;
     ext_hdr_len += (exthdr->len + 1) * 8;
 
-    LOG_DBG("uncompression: %d len: %d exhdrlen: %d (calc: %d)\n",
-           proto, len, exthdr->len, (exthdr->len + 1) * 8);
+    LOG_DBG("uncompression: %d len: %d exthdr len: %d (calc: %d)\n",
+            proto, len, exthdr->len, (exthdr->len + 1) * 8);
   }
 
   /* The next header is compressed, NHC is following */
-  if(nhc && (*hc06_ptr & SICSLOWPAN_NHC_UDP_MASK) == SICSLOWPAN_NHC_UDP_ID) {
-    struct uip_udp_hdr *udp_buf = (struct uip_udp_hdr *)ip_payload;
+  CHECK_READ_SPACE(1);
+  if(nhc && (*iphc_ptr & SICSLOWPAN_NHC_UDP_MASK) == SICSLOWPAN_NHC_UDP_ID) {
+    struct uip_udp_hdr *udp_buf;
     uint16_t udp_len;
     uint8_t checksum_compressed;
+
+    /* Check that there is enough room to write the UDP header. */
+    if((ip_payload - buf) + UIP_UDPH_LEN > buf_size) {
+      LOG_WARN("uncompression: cannot write UDP header beyond target buffer\n");
+      return false;
+    }
+
+    udp_buf = (struct uip_udp_hdr *)ip_payload;
     *last_nextheader = UIP_PROTO_UDP;
-    checksum_compressed = *hc06_ptr & SICSLOWPAN_NHC_UDP_CHECKSUMC;
-    LOG_DBG("uncompression: incoming header value: %i\n", *hc06_ptr);
-    switch(*hc06_ptr & SICSLOWPAN_NHC_UDP_CS_P_11) {
+    checksum_compressed = *iphc_ptr & SICSLOWPAN_NHC_UDP_CHECKSUMC;
+    LOG_DBG("uncompression: incoming header value: %i\n", *iphc_ptr);
+    switch(*iphc_ptr & SICSLOWPAN_NHC_UDP_CS_P_11) {
     case SICSLOWPAN_NHC_UDP_CS_P_00:
       /* 1 byte for NHC, 4 byte for ports, 2 bytes chksum */
-      memcpy(&udp_buf->srcport, hc06_ptr + 1, 2);
-      memcpy(&udp_buf->destport, hc06_ptr + 3, 2);
+      CHECK_READ_SPACE(5);
+      memcpy(&udp_buf->srcport, iphc_ptr + 1, 2);
+      memcpy(&udp_buf->destport, iphc_ptr + 3, 2);
       LOG_DBG("uncompression: UDP ports (ptr+5): %x, %x\n",
              UIP_HTONS(udp_buf->srcport),
              UIP_HTONS(udp_buf->destport));
-      hc06_ptr += 5;
+      iphc_ptr += 5;
       break;
 
     case SICSLOWPAN_NHC_UDP_CS_P_01:
       /* 1 byte for NHC + source 16bit inline, dest = 0xF0 + 8 bit inline */
       LOG_DBG("uncompression: destination address\n");
-      memcpy(&udp_buf->srcport, hc06_ptr + 1, 2);
-      udp_buf->destport = UIP_HTONS(SICSLOWPAN_UDP_8_BIT_PORT_MIN + (*(hc06_ptr + 3)));
+      CHECK_READ_SPACE(4);
+      memcpy(&udp_buf->srcport, iphc_ptr + 1, 2);
+      udp_buf->destport = UIP_HTONS(SICSLOWPAN_UDP_8_BIT_PORT_MIN + (*(iphc_ptr + 3)));
       LOG_DBG("uncompression: UDP ports (ptr+4): %x, %x\n",
              UIP_HTONS(udp_buf->srcport), UIP_HTONS(udp_buf->destport));
-      hc06_ptr += 4;
+      iphc_ptr += 4;
       break;
 
     case SICSLOWPAN_NHC_UDP_CS_P_10:
       /* 1 byte for NHC + source = 0xF0 + 8bit inline, dest = 16 bit inline*/
       LOG_DBG("uncompression: source address\n");
+      CHECK_READ_SPACE(4);
       udp_buf->srcport = UIP_HTONS(SICSLOWPAN_UDP_8_BIT_PORT_MIN +
-                                   (*(hc06_ptr + 1)));
-      memcpy(&udp_buf->destport, hc06_ptr + 2, 2);
+                                   (*(iphc_ptr + 1)));
+      memcpy(&udp_buf->destport, iphc_ptr + 2, 2);
       LOG_DBG("uncompression: UDP ports (ptr+4): %x, %x\n",
              UIP_HTONS(udp_buf->srcport), UIP_HTONS(udp_buf->destport));
-      hc06_ptr += 4;
+      iphc_ptr += 4;
       break;
 
     case SICSLOWPAN_NHC_UDP_CS_P_11:
       /* 1 byte for NHC, 1 byte for ports */
+      CHECK_READ_SPACE(2);
       udp_buf->srcport = UIP_HTONS(SICSLOWPAN_UDP_4_BIT_PORT_MIN +
-                                   (*(hc06_ptr + 1) >> 4));
+                                   (*(iphc_ptr + 1) >> 4));
       udp_buf->destport = UIP_HTONS(SICSLOWPAN_UDP_4_BIT_PORT_MIN +
-                                    ((*(hc06_ptr + 1)) & 0x0F));
+                                    ((*(iphc_ptr + 1)) & 0x0F));
       LOG_DBG("uncompression: UDP ports (ptr+2): %x, %x\n",
              UIP_HTONS(udp_buf->srcport), UIP_HTONS(udp_buf->destport));
-      hc06_ptr += 2;
+
+      iphc_ptr += 2;
       break;
     default:
       LOG_DBG("uncompression: error unsupported UDP compression\n");
-      return;
+      return false;
     }
     if(!checksum_compressed) { /* has_checksum, default  */
-      memcpy(&udp_buf->udpchksum, hc06_ptr, 2);
-      hc06_ptr += 2;
+      CHECK_READ_SPACE(2);
+      memcpy(&udp_buf->udpchksum, iphc_ptr, 2);
+      iphc_ptr += 2;
       LOG_DBG("uncompression: checksum included\n");
     } else {
       LOG_DBG("uncompression: checksum *NOT* included\n");
     }
 
     /* length field in UDP header (8 byte header + payload) */
-    udp_len = 8 + packetbuf_datalen() - (hc06_ptr - packetbuf_ptr);
+    udp_len = 8 + packetbuf_datalen() - (iphc_ptr - packetbuf_ptr);
     udp_buf->udplen = UIP_HTONS(ip_len == 0 ? udp_len :
                                 ip_len - UIP_IPH_LEN - ext_hdr_len);
     LOG_DBG("uncompression: UDP length: %u (ext: %u) ip_len: %d udp_len: %d\n",
@@ -1353,7 +1424,7 @@ uncompress_hdr_iphc(uint8_t *buf, uint16_t ip_len)
     uncomp_hdr_len += UIP_UDPH_LEN;
   }
 
-  packetbuf_hdr_len = hc06_ptr - packetbuf_ptr;
+  packetbuf_hdr_len = iphc_ptr - packetbuf_ptr;
 
   /* IP length field. */
   if(ip_len == 0) {
@@ -1369,6 +1440,8 @@ uncompress_hdr_iphc(uint8_t *buf, uint16_t ip_len)
     SICSLOWPAN_IP_BUF(buf)->len[0] = (ip_len - UIP_IPH_LEN) >> 8;
     SICSLOWPAN_IP_BUF(buf)->len[1] = (ip_len - UIP_IPH_LEN) & 0x00FF;
   }
+
+  return true;
 }
 /** @} */
 #endif /* SICSLOWPAN_COMPRESSION >= SICSLOWPAN_COMPRESSION_IPHC */
@@ -1437,7 +1510,7 @@ digest_6lorh_hdr(void)
  */
 #if SICSLOWPAN_COMPRESSION == SICSLOWPAN_COMPRESSION_IPV6
 static void
-compress_hdr_ipv6(linkaddr_t *link_destaddr)
+compress_hdr_ipv6(void)
 {
   *packetbuf_ptr = SICSLOWPAN_DISPATCH_IPV6;
   packetbuf_hdr_len += SICSLOWPAN_IPV6_HDR_LEN;
@@ -1485,22 +1558,10 @@ packet_sent(void *ptr, int status, int transmissions)
 /**
  * \brief This function is called by the 6lowpan code to send out a
  * packet.
- * \param dest the link layer destination address of the packet
  */
 static void
-send_packet(linkaddr_t *dest)
+send_packet(void)
 {
-  /* Set the link layer destination address for the packet as a
-   * packetbuf attribute. The MAC layer can access the destination
-   * address with the function packetbuf_addr(PACKETBUF_ADDR_RECEIVER).
-   */
-  packetbuf_set_addr(PACKETBUF_ADDR_RECEIVER, dest);
-
-#if NETSTACK_CONF_BRIDGE_MODE
-  /* This needs to be explicitly set here for bridge mode to work */
-  packetbuf_set_addr(PACKETBUF_ADDR_SENDER,(void*)&uip_lladdr);
-#endif
-
   /* Provide a callback function to receive the result of
      a packet transmission. */
   NETSTACK_MAC.send(&packet_sent, NULL);
@@ -1519,7 +1580,8 @@ send_packet(linkaddr_t *dest)
  * \return 1 if success, 0 otherwise
  */
 static int
-fragment_copy_payload_and_send(uint16_t uip_offset, linkaddr_t *dest) {
+fragment_copy_payload_and_send(uint16_t uip_offset)
+{
   struct queuebuf *q;
 
   /* Now copy fragment payload from uip_buf */
@@ -1535,7 +1597,7 @@ fragment_copy_payload_and_send(uint16_t uip_offset, linkaddr_t *dest) {
   }
 
   /* Send fragment */
-  send_packet(dest);
+  send_packet();
 
   /* Restore packetbuf from queuebuf */
   queuebuf_to_packetbuf(q);
@@ -1543,8 +1605,7 @@ fragment_copy_payload_and_send(uint16_t uip_offset, linkaddr_t *dest) {
 
   /* Check tx result. */
   if((last_tx_status == MAC_TX_COLLISION) ||
-     (last_tx_status == MAC_TX_ERR) ||
-     (last_tx_status == MAC_TX_ERR_FATAL)) {
+     (last_tx_status >= MAC_TX_ERR)) {
     LOG_ERR("output: error in fragment tx, dropping subsequent fragments.\n");
     return 0;
   }
@@ -1566,9 +1627,6 @@ output(const linkaddr_t *localdest)
 {
   int frag_needed;
 
-  /* The MAC address of the destination of the packet */
-  linkaddr_t dest;
-
   /* init */
   uncomp_hdr_len = 0;
   packetbuf_hdr_len = 0;
@@ -1583,25 +1641,16 @@ output(const linkaddr_t *localdest)
     set_packet_attrs();
   }
 
-  /*
-   * The destination address will be tagged to each outbound
-   * packet. If the argument localdest is NULL, we are sending a
-   * broadcast packet.
-   */
-  if(localdest == NULL) {
-    linkaddr_copy(&dest, &linkaddr_null);
-  } else {
-    linkaddr_copy(&dest, localdest);
-  }
-
   LOG_INFO("output: sending IPv6 packet with len %d\n", uip_len);
 
   /* copy over the retransmission count from uipbuf attributes */
   packetbuf_set_attr(PACKETBUF_ATTR_MAX_MAC_TRANSMISSIONS,
                      uipbuf_get_attr(UIPBUF_ATTR_MAX_MAC_TRANSMISSIONS));
 
-/* Calculate NETSTACK_FRAMER's header length, that will be added in the NETSTACK_MAC */
-  packetbuf_set_addr(PACKETBUF_ADDR_RECEIVER, &dest);
+  /* Copy destination address to packetbuf */
+  packetbuf_set_addr(PACKETBUF_ADDR_RECEIVER,
+      localdest ? localdest : &linkaddr_null);
+
 #if LLSEC802154_USES_AUX_HEADER
   /* copy LLSEC level */
   packetbuf_set_attr(PACKETBUF_ATTR_SECURITY_LEVEL,
@@ -1612,6 +1661,7 @@ output(const linkaddr_t *localdest)
 #endif /* LLSEC802154_USES_EXPLICIT_KEYS */
 #endif /*  LLSEC802154_USES_AUX_HEADER */
 
+  /* Calculate NETSTACK_FRAMER's header length, that will be added in the NETSTACK_MAC */
   mac_max_payload = NETSTACK_MAC.max_payload();
 
   if(mac_max_payload <= 0) {
@@ -1622,7 +1672,7 @@ output(const linkaddr_t *localdest)
 
   /* Try to compress the headers */
 #if SICSLOWPAN_COMPRESSION == SICSLOWPAN_COMPRESSION_IPV6
-  compress_hdr_ipv6(&dest);
+  compress_hdr_ipv6();
 #endif /* SICSLOWPAN_COMPRESSION == SICSLOWPAN_COMPRESSION_IPV6 */
 #if SICSLOWPAN_COMPRESSION == SICSLOWPAN_COMPRESSION_6LORH
   /* Add 6LoRH headers before IPHC. Only needed on routed traffic
@@ -1633,7 +1683,7 @@ output(const linkaddr_t *localdest)
   }
 #endif /* SICSLOWPAN_COMPRESSION == SICSLOWPAN_COMPRESSION_6LORH */
 #if SICSLOWPAN_COMPRESSION >= SICSLOWPAN_COMPRESSION_IPHC
-  if(compress_hdr_iphc(&dest) == 0) {
+  if(compress_hdr_iphc() == 0) {
     /* Warning should already be issued by function above */
     return 0;
   }
@@ -1642,8 +1692,6 @@ output(const linkaddr_t *localdest)
   /* Use the mac_max_payload to understand what is the max payload in a MAC
    * packet. We calculate it here only to make a better decision of whether
    * the outgoing packet needs to be fragmented or not. */
-
-  packetbuf_set_addr(PACKETBUF_ADDR_RECEIVER, &dest);
 
   frag_needed = (int)uip_len - (int)uncomp_hdr_len + (int)packetbuf_hdr_len > mac_max_payload;
   LOG_INFO("output: header len %d -> %d, total len %d -> %d, MAC max payload %d, frag_needed %d\n",
@@ -1677,18 +1725,21 @@ output(const linkaddr_t *localdest)
     /* sum of all IPv6 payload that goes to non-first and non-last fragments */
     int middle_fragn_total_payload = MAX(total_payload - frag1_payload - last_fragn_max_payload, 0);
     /* Ceiling of: 2 + middle_fragn_total_payload / fragn_max_payload */
-    int fragment_count = 2;
+    unsigned fragment_count = 2;
     if(middle_fragn_total_payload > 0) {
       fragment_count += 1 + (middle_fragn_total_payload - 1) / fragn_max_payload;
     }
 
-    int freebuf = queuebuf_numfree() - 1;
-    LOG_INFO("output: fragmentation needed, fragments: %u, free queuebufs: %u\n",
-      fragment_count, freebuf);
+    size_t free_bufs = queuebuf_numfree();
+    LOG_INFO("output: fragmentation needed. fragments: %u, free queuebufs: %zu\n",
+      fragment_count, free_bufs);
 
-    if(freebuf < fragment_count) {
-      LOG_WARN("output: dropping packet, not enough free bufs (needed: %u, free: %u)\n",
-        fragment_count, freebuf);
+    /* Keep one queuebuf in reserve for certain protocol implementations
+       at other layers. */
+    size_t needed_bufs = fragment_count + 1;
+    if(free_bufs < needed_bufs) {
+      LOG_WARN("output: dropping packet, not enough free bufs (needed: %zu, free: %zu)\n",
+        needed_bufs, free_bufs);
       return 0;
     }
 
@@ -1722,7 +1773,7 @@ output(const linkaddr_t *localdest)
     LOG_INFO("output: fragment %d/%d (tag %d, payload %d)\n",
              curr_frag + 1, fragment_count,
              frag_tag, packetbuf_payload_len);
-    if(fragment_copy_payload_and_send(uncomp_hdr_len, &dest) == 0) {
+    if(fragment_copy_payload_and_send(uncomp_hdr_len) == 0) {
       return 0;
     }
 
@@ -1756,7 +1807,7 @@ output(const linkaddr_t *localdest)
       LOG_INFO("output: fragment %d/%d (tag %d, payload %d, offset %d)\n",
                curr_frag + 1, fragment_count,
                frag_tag, packetbuf_payload_len, processed_ip_out_len);
-      if(fragment_copy_payload_and_send(processed_ip_out_len, &dest) == 0) {
+      if(fragment_copy_payload_and_send(processed_ip_out_len) == 0) {
         return 0;
       }
 
@@ -1781,7 +1832,7 @@ output(const linkaddr_t *localdest)
     memcpy(packetbuf_ptr + packetbuf_hdr_len, (uint8_t *)UIP_IP_BUF + uncomp_hdr_len,
            uip_len - uncomp_hdr_len);
     packetbuf_set_datalen(uip_len - uncomp_hdr_len + packetbuf_hdr_len);
-    send_packet(&dest);
+    send_packet();
   }
   return 1;
 }
@@ -1806,6 +1857,7 @@ input(void)
   /* offset of the fragment in the IP packet */
   uint8_t frag_offset = 0;
   uint8_t *buffer;
+  uint16_t buffer_size;
 
 #if SICSLOWPAN_CONF_FRAG
   uint8_t is_fragment = 0;
@@ -1836,10 +1888,13 @@ input(void)
 
   /* This is default uip_buf since we assume that this is not fragmented */
   buffer = (uint8_t *)UIP_IP_BUF;
+  buffer_size = UIP_BUFSIZE;
 
-  /* Save the RSSI of the incoming packet in case the upper layer will
+  /* Save the RSSI and LQI of the incoming packet in case the upper layer will
      want to query us for it later. */
-  last_rssi = (signed short)packetbuf_attr(PACKETBUF_ATTR_RSSI);
+  uipbuf_set_attr(UIPBUF_ATTR_RSSI, packetbuf_attr(PACKETBUF_ATTR_RSSI));
+  uipbuf_set_attr(UIPBUF_ATTR_LINK_QUALITY, packetbuf_attr(PACKETBUF_ATTR_LINK_QUALITY));
+
 
 #if SICSLOWPAN_CONF_FRAG
 
@@ -1868,6 +1923,7 @@ input(void)
       }
 
       buffer = frag_info[frag_context].first_frag;
+      buffer_size = SICSLOWPAN_FIRST_FRAGMENT_SIZE;
       break;
     case SICSLOWPAN_DISPATCH_FRAGN:
       /*
@@ -1922,7 +1978,10 @@ input(void)
   if(SICSLOWPAN_COMPRESSION > SICSLOWPAN_COMPRESSION_IPV6 &&
      (PACKETBUF_6LO_PTR[PACKETBUF_6LO_DISPATCH] & SICSLOWPAN_DISPATCH_IPHC_MASK) == SICSLOWPAN_DISPATCH_IPHC) {
     LOG_DBG("uncompression: IPHC dispatch\n");
-    uncompress_hdr_iphc(buffer, frag_size);
+    if(uncompress_hdr_iphc(buffer, buffer_size, frag_size) == false) {
+      LOG_ERR("input: failed to decompress IPHC packet\n");
+      return;
+    }
   } else if(PACKETBUF_6LO_PTR[PACKETBUF_6LO_DISPATCH] == SICSLOWPAN_DISPATCH_IPV6) {
     LOG_DBG("uncompression: IPV6 dispatch\n");
     packetbuf_hdr_len += SICSLOWPAN_IPV6_HDR_LEN;
@@ -1964,12 +2023,12 @@ input(void)
 
   /* Sanity-check size of incoming packet to avoid buffer overflow */
   {
-    int req_size = uncomp_hdr_len + (uint16_t)(frag_offset << 3)
+    unsigned int req_size = uncomp_hdr_len + (uint16_t)(frag_offset << 3)
         + packetbuf_payload_len;
     if(req_size > sizeof(uip_buf)) {
 #if SICSLOWPAN_CONF_FRAG
       LOG_ERR(
-          "input: packet and fragment context %u dropped, minimum required IP_BUF size: %d+%d+%d=%d (current size: %u)\n",
+          "input: packet and fragment context %u dropped, minimum required IP_BUF size: %d+%d+%d=%u (current size: %u)\n",
           frag_context,
           uncomp_hdr_len, (uint16_t)(frag_offset << 3),
           packetbuf_payload_len, req_size, (unsigned)sizeof(uip_buf));
@@ -1984,6 +2043,10 @@ input(void)
   /* copy the payload if buffer is non-null - which is only the case with first fragment
      or packets that are non fragmented */
   if(buffer != NULL) {
+    if(uncomp_hdr_len + packetbuf_payload_len > buffer_size) {
+      LOG_ERR("input: cannot copy the payload into the buffer\n");
+      return;
+    }
     memcpy((uint8_t *)buffer + uncomp_hdr_len, packetbuf_ptr + packetbuf_hdr_len, packetbuf_payload_len);
   }
 
@@ -2110,12 +2173,6 @@ sicslowpan_init(void)
 #endif /* SICSLOWPAN_CONF_MAX_ADDR_CONTEXTS > 1 */
 
 #endif /* SICSLOWPAN_COMPRESSION == SICSLOWPAN_COMPRESSION_IPHC */
-}
-/*--------------------------------------------------------------------*/
-int
-sicslowpan_get_last_rssi(void)
-{
-  return last_rssi;
 }
 /*--------------------------------------------------------------------*/
 const struct network_driver sicslowpan_driver = {

@@ -43,8 +43,8 @@
 /** \addtogroup log
 * @{ */
 
-#ifndef __LOG_CONF_H__
-#define __LOG_CONF_H__
+#ifndef LOG_CONF_H_
+#define LOG_CONF_H_
 
 /* Log only the last 16 bytes of link-layer and IPv6 addresses (or, if)
  * the deployment module is enabled, the node IDs */
@@ -53,6 +53,13 @@
 #else /* LOG_CONF_WITH_COMPACT_ADDR */
 #define LOG_WITH_COMPACT_ADDR 0
 #endif /* LOG_CONF_WITH_COMPACT_ADDR */
+
+/* Log bytes as compact hex dump or with whitespace between hexcharacters */
+#ifdef LOG_CONF_WITH_COMPACT_BYTES
+#define LOG_WITH_COMPACT_BYTES LOG_CONF_WITH_COMPACT_BYTES
+#else /* LOG_CONF_WITH_COMPACT_BYTES */
+#define LOG_WITH_COMPACT_BYTES 1
+#endif /* LOG_CONF_WITH_COMPACT_BYTES */
 
 /* Prefix all logs with file name and line-of-code */
 #ifdef LOG_CONF_WITH_LOC
@@ -81,6 +88,13 @@
 #else /* LOG_CONF_OUTPUT */
 #define LOG_OUTPUT(...) printf(__VA_ARGS__)
 #endif /* LOG_CONF_OUTPUT */
+
+/* Color the prefix based on the log level. Disabled by default */
+#ifdef LOG_CONF_WITH_COLOR
+#define LOG_WITH_COLOR LOG_CONF_WITH_COLOR
+#else /* LOG_CONF_WITH_COLOR */
+#define LOG_WITH_COLOR 0
+#endif /* LOG_CONF_WITH_COLOR */
 
 /*
  * Custom output function to prefix logs with level and module.
@@ -138,9 +152,13 @@
 #define LOG_CONF_LEVEL_COAP                        LOG_LEVEL_NONE
 #endif /* LOG_CONF_LEVEL_COAP */
 
+#ifndef LOG_CONF_LEVEL_DTLS
+#define LOG_CONF_LEVEL_DTLS                        LOG_LEVEL_NONE
+#endif /* LOG_CONF_LEVEL_DTLS */
+
 #ifndef LOG_CONF_LEVEL_SNMP
 #define LOG_CONF_LEVEL_SNMP                        LOG_LEVEL_NONE
-#endif /* LOG_CONF_LEVEL_COAP */
+#endif /* LOG_CONF_LEVEL_SNMP */
 
 #ifndef LOG_CONF_LEVEL_LWM2M
 #define LOG_CONF_LEVEL_LWM2M                       LOG_LEVEL_NONE
@@ -150,7 +168,11 @@
 #define LOG_CONF_LEVEL_MAIN                        LOG_LEVEL_INFO
 #endif /* LOG_CONF_LEVEL_MAIN */
 
-#endif /* __LOG_CONF_H__ */
+#ifndef LOG_CONF_LEVEL_SYS
+#define LOG_CONF_LEVEL_SYS                         LOG_LEVEL_NONE
+#endif /* LOG_CONF_LEVEL_SYS */
+
+#endif /* LOG_CONF_H_ */
 
 /** @} */
 /** @} */

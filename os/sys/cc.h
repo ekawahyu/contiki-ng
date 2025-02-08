@@ -46,64 +46,48 @@
 #define CC_H_
 
 #include "contiki.h"
-#include "sys/cc-gcc.h"
+
+#ifdef __GNUC__
+
+#ifndef CC_CONF_ASSUME
+  #ifdef __clang__
+    #define CC_CONF_ASSUME(c) do { __builtin_assume((c)); } while(0)
+  #elif __GNUC__ >= 13
+    #define CC_CONF_ASSUME(c) __attribute__((__assume__(c)))
+  #else
+    #define CC_CONF_ASSUME(c) do { if (!(c)) __builtin_unreachable(); } while(0)
+  #endif
+#endif
+
+#define CC_CONF_ALIGN(n) __attribute__((__aligned__(n)))
+
+#ifndef CC_CONF_CONSTRUCTOR
+#define CC_CONF_CONSTRUCTOR(prio) __attribute__((constructor(prio)))
+#endif /* CC_CONF_CONSTRUCTOR */
+
+#ifndef CC_CONF_DESTRUCTOR
+#define CC_CONF_DESTRUCTOR(prio) __attribute__((destructor(prio)))
+#endif /* CC_CONF_DESTRUCTOR */
+
+#define CC_CONF_DEPRECATED(msg) __attribute__((deprecated(msg)))
+
+#define CC_CONF_NORETURN __attribute__((__noreturn__))
+
+#endif /* __GNUC__ */
 
 /**
- * Configure if the C compiler supports the "register" keyword for
- * function arguments.
+ * Configure if the C compiler supports taking hints from the user about
+ * invariants, e.g. with __attribute__((__assume__(hint))).
  */
-#if CC_CONF_REGISTER_ARGS
-#define CC_REGISTER_ARG register
-#else /* CC_CONF_REGISTER_ARGS */
-#define CC_REGISTER_ARG
-#endif /* CC_CONF_REGISTER_ARGS */
-
-/**
- * Configure if the C compiler supports the arguments for function
- * pointers.
- */
-#if CC_CONF_FUNCTION_POINTER_ARGS
-#define CC_FUNCTION_POINTER_ARGS 1
-#else /* CC_CONF_FUNCTION_POINTER_ARGS */
-#define CC_FUNCTION_POINTER_ARGS 0
-#endif /* CC_CONF_FUNCTION_POINTER_ARGS */
-
-/**
- * Configure if the C compiler have problems with const function pointers
- */
-#ifdef CC_CONF_CONST_FUNCTION_BUG
-#define CC_CONST_FUNCTION
-#else /* CC_CONF_CONST_FUNCTION_BUG */
-#define CC_CONST_FUNCTION const
-#endif /* CC_CONF_CONST_FUNCTION_BUG */
-
-/**
- * Configure work-around for unsigned char bugs with sdcc.
- */
-#if CC_CONF_UNSIGNED_CHAR_BUGS
-#define CC_UNSIGNED_CHAR_BUGS 1
-#else /* CC_CONF_UNSIGNED_CHAR_BUGS */
-#define CC_UNSIGNED_CHAR_BUGS 0
-#endif /* CC_CONF_UNSIGNED_CHAR_BUGS */
-
-/**
- * Configure if C compiler supports double hash marks in C macros.
- */
-#if CC_CONF_DOUBLE_HASH
-#define CC_DOUBLE_HASH 1
-#else /* CC_CONF_DOUBLE_HASH */
-#define CC_DOUBLE_HASH 0
-#endif /* CC_CONF_DOUBLE_HASH */
-
-#ifdef CC_CONF_INLINE
-#define CC_INLINE CC_CONF_INLINE
-#else /* CC_CONF_INLINE */
-#define CC_INLINE
-#endif /* CC_CONF_INLINE */
+#ifdef CC_CONF_ASSUME
+#define ASSUME(c) CC_CONF_ASSUME(c)
+#else
+#define ASSUME(c)
+#endif /* CC_CONF_ASSUME */
 
 #ifdef CC_CONF_ALIGN
 #define CC_ALIGN(n) CC_CONF_ALIGN(n)
-#endif /* CC_CONF_INLINE */
+#endif /* CC_CONF_ALIGN */
 
 /**
  * Configure if the C compiler supports functions that are not meant to return
@@ -116,17 +100,38 @@
 #endif /* CC_CONF_NORETURN */
 
 /**
- * Configure if the C compiler supports the assignment of struct value.
+ * Configure if the C compiler supports marking functions as constructors
+ * e.g. with __attribute__((constructor(prio))).
+ *
+ * Lower priority runs before higher priority. Priorities 0-100 are reserved.
  */
-#ifdef CC_CONF_ASSIGN_AGGREGATE
-#define CC_ASSIGN_AGGREGATE(dest, src)	CC_CONF_ASSIGN_AGGREGATE(dest, src)
-#else /* CC_CONF_ASSIGN_AGGREGATE */
-#define CC_ASSIGN_AGGREGATE(dest, src)	*dest = *src
-#endif /* CC_CONF_ASSIGN_AGGREGATE */
+#ifdef CC_CONF_CONSTRUCTOR
+#define CC_CONSTRUCTOR(prio) CC_CONF_CONSTRUCTOR(prio)
+#else
+#define CC_CONSTRUCTOR(prio)
+#endif /* CC_CONF_CONSTRUCTOR */
 
-#if CC_CONF_NO_VA_ARGS
-#define CC_NO_VA_ARGS CC_CONF_VA_ARGS
-#endif
+/**
+ * Configure if the C compiler supports marking functions as destructors
+ * e.g. with __attribute__((destructor(prio))).
+ *
+ * Lower priority runs before higher priority. Priorities 0-100 are reserved.
+ */
+#ifdef CC_CONF_DESTRUCTOR
+#define CC_DESTRUCTOR(prio) CC_CONF_DESTRUCTOR(prio)
+#else
+#define CC_DESTRUCTOR(prio)
+#endif /* CC_CONF_DESTRUCTOR */
+
+/**
+ * Configure if the C compiler supports marking functions as deprecated
+ * e.g. with __attribute__((deprecated))
+ */
+#ifdef CC_CONF_DEPRECATED
+#define CC_DEPRECATED(msg) CC_CONF_DEPRECATED(msg)
+#else
+#define CC_DEPRECATED(msg)
+#endif /* CC_CONF_DEPRECATED */
 
 /** \def CC_ACCESS_NOW(x)
  * This macro ensures that the access to a non-volatile variable can
@@ -155,6 +160,10 @@
 #define ABS(n)      (((n) < 0) ? -(n) : (n))
 #endif
 
+#ifndef BOUND
+#define BOUND(a, minimum, maximum)   MIN(MAX(a, minimum), maximum)
+#endif
+
 
 #define CC_CONCAT2(s1, s2) s1##s2
 /**
@@ -171,5 +180,13 @@
  */
 #define CC_CONCAT3(s1, s2, s3) s1##s2##s3
 #define CC_CONCAT_EXT_3(s1, s2, s3) CC_CONCAT3(s1, s2, s3)
+
+/* Provide static_assert macro in C11-C17. */
+#if __STDC_VERSION__ >= 201112L && __STDC_VERSION__ < 202311L && \
+  !defined __cplusplus
+#ifndef static_assert
+#define static_assert _Static_assert
+#endif
+#endif
 
 #endif /* CC_H_ */

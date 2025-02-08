@@ -1,9 +1,6 @@
 #!/bin/bash
 source ../utils.sh
 
-# Contiki directory
-CONTIKI=$1
-
 # Basic statistics for packet parsing results.
 SUCCEEDED=0
 FAILED=0
@@ -17,13 +14,20 @@ echo packet dir = $PACKET_DIR
 
 # Starting Contiki-NG native node
 echo "Starting native node"
-make -C $CODE_DIR TARGET=native > make.log 2> make.err
-
 for i in $PACKET_DIR/*
 do
-  export TEST_FILE=$i
-  echo Injecting file $TEST_FILE
-  timeout -k 1s 2s sh -c "$CODE_DIR/$CODE.native >> $CODE.log 2>> $CODE.err"
+  if [ -d "$i" ]; then
+    test_files=()
+    for f in $i/*
+    do
+      test_files+=("$f")
+    done
+    echo Injecting ${#test_files[@]} files in $i
+  else
+    test_files=("$i")
+    echo Injecting file $i
+  fi
+  timeout -k 1s 2s "$CODE_DIR/build/native/$CODE.native" "${test_files[@]}"
   INJECTOR_EXIT_CODE=$?
   echo "exit code:" $INJECTOR_EXIT_CODE
 
@@ -43,28 +47,10 @@ done
 echo "Closing native node"
 
 if [ $((TIMEDOUT + FAILED)) -gt 0 ]; then
-  echo "==== make.log ====" ; cat make.log;
-  echo "==== make.err ====" ; cat make.err;
-  echo "==== $CODE.log ====" ; cat $CODE.log;
-  echo "==== $CODE.err ====" ; cat $CODE.err;
+  printf "%-32s TEST FAIL\n" "$CODE-$TEST_PROTOCOL"
 
-  printf "%-32s TEST FAIL\n" "$CODE-$TEST_PROTOCOL" | tee $CODE.testlog;
-else
-  cp $CODE.log $CODE.testlog
-  printf "%-32s TEST OK\n" "$CODE-$TEST_PROTOCOL" | tee $CODE.testlog;
+  echo "Succeeded: " $SUCCEEDED
+  echo "Timed out: " $TIMEDOUT
+  echo "Failed   : " $FAILED
+  exit 1
 fi
-
-rm make.log
-rm make.err
-rm $CODE.log
-rm $CODE.err
-
-echo "Succeeded: " $SUCCEEDED
-echo "Timed out: " $TIMEDOUT
-echo "Failed   : " $FAILED
-
-sleep 3
-
-# We do not want Make to stop -> Return 0
-# The Makefile will check if a log contains FAIL at the end
-exit 0

@@ -25,9 +25,9 @@
  * LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
  * OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
  * SUCH DAMAGE.
- *
- * This file is part of the Contiki operating system.
- *
+ */
+
+/*
  * \file
  *   Private declarations for ContikiRPL.
  * \author
@@ -150,18 +150,22 @@
 #define RPL_ROUTE_INFINITE_LIFETIME           0xFFFFFFFF
 
 #define RPL_LIFETIME(instance, lifetime) \
-          (((lifetime) == RPL_INFINITE_LIFETIME) ? RPL_ROUTE_INFINITE_LIFETIME : (unsigned long)(instance)->lifetime_unit * (lifetime))
+          (((lifetime) == RPL_INFINITE_LIFETIME) ? \
+              RPL_ROUTE_INFINITE_LIFETIME : \
+              (unsigned long)(instance)->lifetime_unit * (lifetime))
 
 
 #ifndef RPL_CONF_MIN_HOPRANKINC
-/* RFC6550 defines the default MIN_HOPRANKINC as 256.
- * However, we use MRHOF as a default Objective Function (RFC6719),
- * which recommends setting MIN_HOPRANKINC with care, in particular
- * when used with ETX as a metric. ETX is computed as a fixed point
- * real with a divisor of 128 (RFC6719, RFC6551). We choose to also
- * use 128 for RPL_MIN_HOPRANKINC, resulting in a rank equal to the
- * ETX path cost. Larger values may also be desirable, as discussed
- * in section 6.1 of RFC6719. */
+/*
+ * RFC6550 defines the default MIN_HOPRANKINC as 256.  However, we use
+ * MRHOF as a default Objective Function (RFC6719), which recommends
+ * setting MIN_HOPRANKINC with care, in particular when used with ETX
+ * as a metric. ETX is computed as a fixed point real with a divisor
+ * of 128 (RFC6719, RFC6551). We choose to also use 128 for
+ * RPL_MIN_HOPRANKINC, resulting in a rank equal to the ETX path
+ * cost. Larger values may also be desirable, as discussed in section
+ * 6.1 of RFC6719.
+ */
 #if RPL_OF_OCP == RPL_OCP_MRHOF
 #define RPL_MIN_HOPRANKINC          128
 #else /* RPL_OF_OCP == RPL_OCP_MRHOF */
@@ -203,11 +207,11 @@
 
 /*---------------------------------------------------------------------------*/
 /* Lollipop counters */
-
 #define RPL_LOLLIPOP_MAX_VALUE           255
 #define RPL_LOLLIPOP_CIRCULAR_REGION     127
 #define RPL_LOLLIPOP_SEQUENCE_WINDOWS    16
 #define RPL_LOLLIPOP_INIT                (RPL_LOLLIPOP_MAX_VALUE - RPL_LOLLIPOP_SEQUENCE_WINDOWS + 1)
+
 #define RPL_LOLLIPOP_INCREMENT(counter)                                 \
   do {                                                                  \
     if((counter) > RPL_LOLLIPOP_CIRCULAR_REGION) {                      \
@@ -263,7 +267,7 @@ typedef struct rpl_stats rpl_stats_t;
 extern rpl_stats_t rpl_stats;
 #endif
 
-/* RPL callbacks when TSCH is enabled */
+/* RPL callbacks when TSCH is enabled. */
 #if MAC_CONF_WITH_TSCH
 
 #ifndef RPL_CALLBACK_PARENT_SWITCH
@@ -339,6 +343,9 @@ rpl_of_t *rpl_find_of(rpl_ocp_t);
 void rpl_schedule_dao(rpl_instance_t *);
 void rpl_schedule_dao_immediately(rpl_instance_t *);
 void rpl_schedule_unicast_dio_immediately(rpl_instance_t *instance);
+void rpl_schedule_unicast_dao_immediately(
+    rpl_instance_t *instance, rpl_parent_t *parent,
+    uip_ipaddr_t *prefix, uint8_t lifetime);
 void rpl_cancel_dao(rpl_instance_t *instance);
 void rpl_schedule_probing(rpl_instance_t *instance);
 void rpl_schedule_probing_now(rpl_instance_t *instance);
@@ -348,7 +355,6 @@ void rpl_reset_periodic_timer(void);
 
 /* Route poisoning. */
 void rpl_poison_routes(rpl_dag_t *, rpl_parent_t *);
-
 
 rpl_instance_t *rpl_get_default_instance(void);
 

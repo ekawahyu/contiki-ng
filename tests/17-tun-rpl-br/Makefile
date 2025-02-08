@@ -1,1 +1,1 @@
-include ../Makefile.script-test
+include ../Makefile.simulation-test

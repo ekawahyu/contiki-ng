@@ -116,6 +116,7 @@
  *
  * The USB pullup is to be enabled by an external resistor, as it is not mapped
  * to a GPIO.
+ * @{
  */
 #ifdef USB_PULLUP_PORT
 #undef USB_PULLUP_PORT
@@ -332,7 +333,9 @@
  * 2.4GHz RF interface, the resistor can be removed to power-off the CC1200.
  * @{
  */
-#define REMOTE_DUAL_RF_ENABLED 1
+#ifndef REMOTE_DUAL_RF_ENABLED
+#define REMOTE_DUAL_RF_ENABLED  1
+#endif
 /** @} */
 /*---------------------------------------------------------------------------*/
 /**

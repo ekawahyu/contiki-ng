@@ -52,9 +52,11 @@
 #include "net/packetbuf.h"
 #if ROUTING_CONF_RPL_LITE
 #include "net/routing/rpl-lite/rpl.h"
+#include "net/routing/rpl-lite/rpl-conf.h"
 #endif /* ROUTING_CONF_RPL_LITE */
 #if ROUTING_CONF_RPL_CLASSIC
 #include "net/routing/rpl-classic/rpl.h"
+#include "net/routing/rpl-classic/rpl-private.h"
 #endif /* ROUTING_CONF_RPL_CLASSIC */
 #include <string.h>
 
@@ -135,7 +137,7 @@ icmp_output()
 
   struct multicast_on_behalf *mob;
   mob = (struct multicast_on_behalf *)UIP_ICMP_PAYLOAD;
-  memcpy(&mob->mcast_payload, &uip_buf[UIP_IPUDPH_LEN], uip_slen);
+  memmove(&mob->mcast_payload, &uip_buf[UIP_IPUDPH_LEN], uip_slen);
 
   UIP_IP_BUF->vtc = 0x60;
   UIP_IP_BUF->tcflow = 0;
@@ -149,6 +151,11 @@ icmp_output()
   payload_len = UIP_ICMP_MOB + uip_slen;
 
   dag_t = rpl_get_any_dag();
+  if(!dag_t) {
+    PRINTF("ESMRF: No DODAG\n");
+    return;
+  }
+
   uip_ipaddr_copy(&UIP_IP_BUF->destipaddr, &dag_t->dag_id);
   uip_ds6_select_src(&UIP_IP_BUF->srcipaddr, &UIP_IP_BUF->destipaddr);
 
@@ -215,9 +222,9 @@ icmp_input()
   c->rport = locmobptr->mcast_port;
   uip_slen = loclen;
   uip_udp_conn=c;
-  memcpy(&uip_buf[UIP_IPUDPH_LEN], locmobptr->mcast_payload,
-         loclen > UIP_BUFSIZE - UIP_IPUDPH_LEN?
-         UIP_BUFSIZE - UIP_IPUDPH_LEN: loclen);
+  memmove(&uip_buf[UIP_IPUDPH_LEN], locmobptr->mcast_payload,
+          loclen > UIP_BUFSIZE - UIP_IPUDPH_LEN ?
+          UIP_BUFSIZE - UIP_IPUDPH_LEN : loclen);
 
   uip_process(UIP_UDP_SEND_CONN);
 
@@ -374,6 +381,9 @@ init()
   /* Register the ICMPv6 input handler */
   uip_icmp6_register_input_handler(&esmrf_icmp_handler);
   c = udp_new(NULL, 0, NULL);
+  if(c == NULL) {
+    PRINTF("ESMRF: No UDP connection available\n");
+  }
 }
 /*---------------------------------------------------------------------------*/
 static void
@@ -385,7 +395,7 @@ out(void)
     PRINTF("ESMRF: There is no DODAG\n");
     return;
   }
-  if(dag_t->rank == 256){
+  if(dag_t->rank == RPL_MIN_HOPRANKINC){
     PRINTF("ESMRF: I am the Root, thus send the multicast packet normally. \n");
     return;
   }

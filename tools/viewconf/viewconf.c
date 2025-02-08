@@ -16,6 +16,10 @@
 
 ##### "CONTIKI_VERSION_STRING": ________________ == CONTIKI_VERSION_STRING
 
+#undef FRAME802154_IEEE802154_2003
+#undef FRAME802154_IEEE802154_2006
+#undef FRAME802154_IEEE802154_2015
+
 #ifdef FRAME802154_CONF_VERSION
 ##### "FRAME802154_CONF_VERSION":_______________ == FRAME802154_CONF_VERSION
 #else
@@ -75,6 +79,30 @@
 #endif
 
 #endif /*MAC_CONF_WITH_TSCH */
+
+#if ROUTING_CONF_RPL_LITE || ROUTING_CONF_RPL_CLASSIC
+
+#undef RPL_MOP_NO_DOWNWARD_ROUTES
+#undef RPL_MOP_NON_STORING
+#undef RPL_MOP_STORING_NO_MULTICAST
+#undef RPL_MOP_STORING_MULTICAST
+
+#undef RPL_OCP_OF0
+#undef RPL_OCP_MRHOF
+
+#ifdef RPL_CONF_MOP
+##### "RPL_CONF_MOP": __________________________ == RPL_CONF_MOP
+#else
+##### "RPL_CONF_MOP": __________________________ -> RPL_MOP_DEFAULT
+#endif
+
+#ifdef RPL_CONF_OF_OCP
+##### "RPL_CONF_OF_OCP": __________________________ == RPL_CONF_OF_OCP
+#else
+##### "RPL_CONF_OF_OCP": __________________________ -> RPL_OF_OCP
+#endif
+
+#endif /* RPL routing */
 
 #ifdef QUEUEBUF_CONF_NUM
 ##### "QUEUEBUF_CONF_NUM": _____________________ == QUEUEBUF_CONF_NUM
@@ -149,6 +177,8 @@
 ##### "LOG_CONF_LEVEL_FRAMER": _________________ == LOG_CONF_LEVEL_FRAMER
 ##### "LOG_CONF_LEVEL_6TOP": ___________________ == LOG_CONF_LEVEL_6TOP
 ##### "LOG_CONF_LEVEL_COAP": ___________________ == LOG_CONF_LEVEL_COAP
+##### "LOG_CONF_LEVEL_DTLS": ___________________ == LOG_CONF_LEVEL_DTLS
 ##### "LOG_CONF_LEVEL_SNMP": ___________________ == LOG_CONF_LEVEL_SNMP
 ##### "LOG_CONF_LEVEL_LWM2M": __________________ == LOG_CONF_LEVEL_LWM2M
+##### "LOG_CONF_LEVEL_SYS": ____________________ == LOG_CONF_LEVEL_SYS
 ##### "LOG_CONF_LEVEL_MAIN": ___________________ == LOG_CONF_LEVEL_MAIN

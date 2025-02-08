@@ -39,8 +39,8 @@
  *         Simon Duquennoy <simonduq@sics.se>
  */
 
-#ifndef __TSCH_TYPES_H__
-#define __TSCH_TYPES_H__
+#ifndef TSCH_TYPES_H_
+#define TSCH_TYPES_H_
 
 /********** Includes **********/
 
@@ -107,14 +107,10 @@ struct tsch_packet {
 
 /** \brief TSCH neighbor information */
 struct tsch_neighbor {
-  /* Neighbors are stored as a list: "next" must be the first field */
-  struct tsch_neighbor *next;
-  linkaddr_t addr; /* MAC address of the neighbor */
   uint8_t is_broadcast; /* is this neighbor a virtual neighbor used for broadcast (of data packets or EBs) */
   uint8_t is_time_source; /* is this neighbor a time source? */
   uint8_t backoff_exponent; /* CSMA backoff exponent */
-  uint8_t backoff_window; /* CSMA backoff window (number of slots to skip) */
-  uint8_t last_backoff_window; /* Last CSMA backoff window */
+  uint16_t backoff_window; /* CSMA backoff window (number of slots to skip) */
   uint8_t tx_links_count; /* How many links do we have to this neighbor? */
   uint8_t dedicated_tx_links_count; /* How many dedicated links do we have to this neighbor? */
   /* Array for the ringbuf. Contains pointers to packets.
@@ -157,5 +153,5 @@ struct input_packet {
   uint8_t channel; /* Channel we received the packet on */
 };
 
-#endif /* __TSCH_CONF_H__ */
+#endif /* TSCH_CONF_H_ */
 /** @} */

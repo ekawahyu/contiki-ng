@@ -57,6 +57,7 @@
 #include "net/mac/mac-sequence.h"
 #include "lib/random.h"
 #include "net/routing/routing.h"
+#include <inttypes.h>
 
 #if TSCH_WITH_SIXTOP
 #include "net/mac/tsch/sixtop/sixtop.h"
@@ -126,8 +127,6 @@ struct tsch_asn_t tsch_current_asn;
 /* Device rank or join priority:
  * For PAN coordinator: 0 -- lower is better */
 uint8_t tsch_join_priority;
-/* The current TSCH sequence number, used for unicast data frames only */
-static uint8_t tsch_packet_seqno;
 /* Current period for EB output */
 static clock_time_t tsch_current_eb_period;
 /* Current period for keepalive output */
@@ -172,6 +171,7 @@ tsch_set_coordinator(int enable)
   }
   tsch_is_coordinator = enable;
   tsch_set_eb_period(TSCH_EB_PERIOD);
+  tsch_roots_set_self_to_root(tsch_is_coordinator ? 1 : 0);
 }
 /*---------------------------------------------------------------------------*/
 void
@@ -226,13 +226,13 @@ tsch_reset(void)
 #endif
   linkaddr_copy(&last_eb_nbr_addr, &linkaddr_null);
 #if TSCH_AUTOSELECT_TIME_SOURCE
-  struct nbr_sync_stat *stat;
+  struct eb_stat *stat;
   best_neighbor_eb_count = 0;
   /* Remove all nbr stats */
-  stat = nbr_table_head(sync_stats);
+  stat = nbr_table_head(eb_stats);
   while(stat != NULL) {
-    nbr_table_remove(sync_stats, stat);
-    stat = nbr_table_next(sync_stats, stat);
+    nbr_table_remove(eb_stats, stat);
+    stat = nbr_table_next(eb_stats, stat);
   }
 #endif /* TSCH_AUTOSELECT_TIME_SOURCE */
   tsch_set_eb_period(TSCH_EB_PERIOD);
@@ -249,10 +249,11 @@ static int
 resynchronize(const linkaddr_t *original_time_source_addr)
 {
   const struct tsch_neighbor *current_time_source = tsch_queue_get_time_source();
-  if(current_time_source && !linkaddr_cmp(&current_time_source->addr, original_time_source_addr)) {
+  const linkaddr_t *ts_addr = tsch_queue_get_nbr_address(current_time_source);
+  if(ts_addr != NULL && !linkaddr_cmp(ts_addr, original_time_source_addr)) {
     /* Time source has already been changed (e.g. by RPL). Let's see if it works. */
     LOG_INFO("time source has been changed to ");
-    LOG_INFO_LLADDR(&current_time_source->addr);
+    LOG_INFO_LLADDR(ts_addr);
     LOG_INFO_("\n");
     return 0;
   }
@@ -271,6 +272,7 @@ resynchronize(const linkaddr_t *original_time_source_addr)
     /* We simply pick the last neighbor we receiver sync information from */
     tsch_queue_update_time_source(&last_eb_nbr_addr);
     tsch_join_priority = last_eb_nbr_jp + 1;
+    linkaddr_copy(&last_eb_nbr_addr, &linkaddr_null);
     /* Try to get in sync ASAP */
     tsch_schedule_keepalive(1);
     return 1;
@@ -313,12 +315,13 @@ keepalive_send(void *ptr)
   if(tsch_is_associated) {
     struct tsch_neighbor *n = tsch_queue_get_time_source();
     if(n != NULL) {
+        linkaddr_t *destination = tsch_queue_get_nbr_address(n);
         /* Simply send an empty packet */
         packetbuf_clear();
-        packetbuf_set_addr(PACKETBUF_ADDR_RECEIVER, &n->addr);
+        packetbuf_set_addr(PACKETBUF_ADDR_RECEIVER, destination);
         NETSTACK_MAC.send(keepalive_packet_sent, NULL);
         LOG_INFO("sending KA to ");
-        LOG_INFO_LLADDR(&n->addr);
+        LOG_INFO_LLADDR(destination);
         LOG_INFO_("\n");
     } else {
         LOG_ERR("no timesource - KA not sent\n");
@@ -397,7 +400,8 @@ eb_input(struct input_packet *current_input)
     /* Got an EB from a different neighbor than our time source, keep enough data
      * to switch to it in case we lose the link to our time source */
     struct tsch_neighbor *ts = tsch_queue_get_time_source();
-    if(ts == NULL || !linkaddr_cmp(&last_eb_nbr_addr, &ts->addr)) {
+    linkaddr_t *ts_addr = tsch_queue_get_nbr_address(ts);
+    if(ts_addr == NULL || !linkaddr_cmp((linkaddr_t *)&frame.src_addr, ts_addr)) {
       linkaddr_copy(&last_eb_nbr_addr, (linkaddr_t *)&frame.src_addr);
       last_eb_nbr_jp = eb_ies.ie_join_priority;
     }
@@ -435,13 +439,18 @@ eb_input(struct input_packet *current_input)
     }
 #endif /* TSCH_AUTOSELECT_TIME_SOURCE */
 
+    /* If this EB is coming from the root, add it to the root list */
+    if(eb_ies.ie_join_priority == 0) {
+      tsch_roots_add_address((linkaddr_t *)&frame.src_addr);
+    }
+
     /* Did the EB come from our time source? */
-    if(ts != NULL && linkaddr_cmp((linkaddr_t *)&frame.src_addr, &ts->addr)) {
+    if(ts_addr != NULL && linkaddr_cmp((linkaddr_t *)&frame.src_addr, ts_addr)) {
       /* Check for ASN drift */
       int32_t asn_diff = TSCH_ASN_DIFF(current_input->rx_asn, eb_ies.ie_asn);
       if(asn_diff != 0) {
         /* We disagree with our time source's ASN -- leave the network */
-        LOG_WARN("! ASN drifted by %ld, leaving the network\n", asn_diff);
+        LOG_WARN("! ASN drifted by %"PRId32", leaving the network\n", asn_diff);
         tsch_disassociate();
       }
 
@@ -472,7 +481,8 @@ eb_input(struct input_packet *current_input)
 
             LOG_WARN("Updating TSCH hopping sequence from EB\n");
           } else {
-            LOG_WARN("TSCH:! parse_eb: hopping sequence too long (%u)\n", eb_ies.ie_hopping_sequence_len);
+            LOG_WARN("parse_eb: Hopping sequence too long (%u)\n",
+                     eb_ies.ie_hopping_sequence_len);
           }
         }
       }
@@ -485,7 +495,7 @@ static void
 tsch_rx_process_pending()
 {
   int16_t input_index;
-  /* Loop on accessing (without removing) a pending input packet */
+  /* Loop on accessing (without removing) a pending output packet */
   while((input_index = ringbufindex_peek_get(&input_ringbuf)) != -1) {
     struct input_packet *current_input = &input_array[input_index];
     frame802154_t frame;
@@ -496,17 +506,21 @@ tsch_rx_process_pending()
       && frame.fcf.frame_type == FRAME802154_BEACONFRAME;
 
     if(is_data) {
-      /* Skip EBs and other control messages */
-      /* Copy to packetbuf for processing */
+      /* Copy payload to packetbuf for processing */
       packetbuf_copyfrom(current_input->payload, current_input->len);
       packetbuf_set_attr(PACKETBUF_ATTR_RSSI, current_input->rssi);
       packetbuf_set_attr(PACKETBUF_ATTR_CHANNEL, current_input->channel);
-    }
 
-    if(is_data) {
       /* Pass to upper layers */
       packet_input();
+
     } else if(is_eb) {
+      /* Don't pass to upper layers, but still count it in link stats */
+      packetbuf_set_attr(PACKETBUF_ATTR_RSSI, current_input->rssi);
+      packetbuf_set_attr(PACKETBUF_ATTR_CHANNEL, current_input->channel);
+      link_stats_input_callback((const linkaddr_t *)frame.src_addr);
+
+      /* Process EB without copying the payload to packetbuf */
       eb_input(current_input);
     }
 
@@ -519,6 +533,7 @@ tsch_rx_process_pending()
 static void
 tsch_tx_process_pending(void)
 {
+  uint16_t num_packets_freed = 0;
   int16_t dequeued_index;
   /* Loop on accessing (without removing) a pending input packet */
   while((dequeued_index = ringbufindex_peek_get(&dequeued_ringbuf)) != -1) {
@@ -533,10 +548,14 @@ tsch_tx_process_pending(void)
     mac_call_sent_callback(p->sent, p->ptr, p->ret, p->transmissions);
     /* Free packet queuebuf */
     tsch_queue_free_packet(p);
-    /* Free all unused neighbors */
-    tsch_queue_free_unused_neighbors();
     /* Remove dequeued packet from ringbuf */
     ringbufindex_get(&dequeued_ringbuf);
+    num_packets_freed++;
+  }
+
+  if(num_packets_freed > 0) {
+    /* Free all unused neighbors */
+    tsch_queue_free_unused_neighbors();
   }
 }
 /*---------------------------------------------------------------------------*/
@@ -555,7 +574,7 @@ tsch_start_coordinator(void)
   tsch_is_associated = 1;
   tsch_join_priority = 0;
 
-  LOG_INFO("starting as coordinator, PAN ID %x, asn-%x.%lx\n",
+  LOG_INFO("starting as coordinator, PAN ID %x, asn-%x.%"PRIx32"\n",
       frame802154_get_pan_id(), tsch_current_asn.ms1b, tsch_current_asn.ls4b);
 
   /* Start slot operation */
@@ -584,7 +603,8 @@ tsch_associate(const struct input_packet *input_eb, rtimer_clock_t timestamp)
 
   if(input_eb == NULL || tsch_packet_parse_eb(input_eb->payload, input_eb->len,
                                               &frame, &ies, &hdrlen, 0) == 0) {
-    LOG_DBG("! failed to parse EB (len %u)\n", input_eb->len);
+    LOG_DBG("! failed to parse packet as EB while scanning (len %u)\n",
+        input_eb->len);
     return 0;
   }
 
@@ -686,7 +706,8 @@ tsch_associate(const struct input_packet *input_eb, rtimer_clock_t timestamp)
         tsch_schedule_add_link(sf,
             ies.ie_tsch_slotframe_and_link.links[i].link_options,
             LINK_TYPE_ADVERTISING, &tsch_broadcast_address,
-            ies.ie_tsch_slotframe_and_link.links[i].timeslot, ies.ie_tsch_slotframe_and_link.links[i].channel_offset);
+            ies.ie_tsch_slotframe_and_link.links[i].timeslot,
+            ies.ie_tsch_slotframe_and_link.links[i].channel_offset, 1);
       }
     } else {
       LOG_ERR("! parse_eb: too many links in schedule (%u)\n", num_links);
@@ -722,12 +743,17 @@ tsch_associate(const struct input_packet *input_eb, rtimer_clock_t timestamp)
       /* Start sending keep-alives now that tsch_is_associated is set */
       tsch_schedule_keepalive(0);
 
+      /* If this EB is coming from the root, add it to the root list */
+      if(ies.ie_join_priority == 0) {
+        tsch_roots_add_address((linkaddr_t *)&frame.src_addr);
+      }
+
 #ifdef TSCH_CALLBACK_JOINING_NETWORK
       TSCH_CALLBACK_JOINING_NETWORK();
 #endif
 
       tsch_association_count++;
-      LOG_INFO("association done (%u), sec %u, PAN ID %x, asn-%x.%lx, jp %u, timeslot id %u, hopping id %u, slotframe len %u with %u links, from ",
+      LOG_INFO("association done (%u), sec %u, PAN ID %x, asn-%x.%"PRIx32", jp %u, timeslot id %u, hopping id %u, slotframe len %u with %u links, from ",
              tsch_association_count,
              tsch_is_pan_secured,
              frame.src_pid,
@@ -763,7 +789,7 @@ PT_THREAD(tsch_scan(struct pt *pt))
 
   TSCH_ASN_INIT(tsch_current_asn, 0, 0);
 
-  etimer_set(&scan_timer, CLOCK_SECOND / TSCH_ASSOCIATION_POLL_FREQUENCY);
+  etimer_set(&scan_timer, MAX(1, CLOCK_SECOND / TSCH_ASSOCIATION_POLL_FREQUENCY));
   current_channel_since = clock_time();
 
   while(!tsch_is_associated && !tsch_is_coordinator) {
@@ -828,7 +854,7 @@ PT_THREAD(tsch_scan(struct pt *pt))
       NETSTACK_RADIO.off();
     } else if(!tsch_is_coordinator) {
       /* Go back to scanning */
-      etimer_reset(&scan_timer);
+      etimer_restart(&scan_timer);
       PT_WAIT_UNTIL(pt, etimer_expired(&scan_timer));
     }
   }
@@ -897,30 +923,35 @@ PROCESS_THREAD(tsch_send_eb_process, ev, data)
   while(1) {
     unsigned long delay;
 
-    if(tsch_is_associated && tsch_current_eb_period > 0
+    if(!tsch_is_associated) {
+      LOG_DBG("skip sending EB: not joined a TSCH network\n");
+    } else if(tsch_current_eb_period <= 0) {
+      LOG_DBG("skip sending EB: EB period disabled\n");
 #ifdef TSCH_RPL_CHECK_DODAG_JOINED
+    } else if(!TSCH_RPL_CHECK_DODAG_JOINED()) {
       /* Implementation section 6.3 of RFC 8180 */
-      && TSCH_RPL_CHECK_DODAG_JOINED()
+      LOG_DBG("skip sending EB: not joined a routing DAG\n");
 #endif /* TSCH_RPL_CHECK_DODAG_JOINED */
+    } else if(NETSTACK_ROUTING.is_in_leaf_mode()) {
       /* don't send when in leaf mode */
-      && !NETSTACK_ROUTING.is_in_leaf_mode()
-        ) {
+      LOG_DBG("skip sending EB: in the leaf mode\n");
+    } else if(tsch_queue_nbr_packet_count(n_eb) != 0) {
       /* Enqueue EB only if there isn't already one in queue */
-      if(tsch_queue_packet_count(&tsch_eb_address) == 0) {
-        uint8_t hdr_len = 0;
-        uint8_t tsch_sync_ie_offset;
-        /* Prepare the EB packet and schedule it to be sent */
-        if(tsch_packet_create_eb(&hdr_len, &tsch_sync_ie_offset) > 0) {
-          struct tsch_packet *p;
-          /* Enqueue EB packet, for a single transmission only */
-          if(!(p = tsch_queue_add_packet(&tsch_eb_address, 1, NULL, NULL))) {
-            LOG_ERR("! could not enqueue EB packet\n");
-          } else {
-              LOG_INFO("TSCH: enqueue EB packet %u %u\n",
-                       packetbuf_totlen(), packetbuf_hdrlen());
-            p->tsch_sync_ie_offset = tsch_sync_ie_offset;
-            p->header_len = hdr_len;
-          }
+      LOG_DBG("skip sending EB: already queued\n");
+    } else {
+      uint8_t hdr_len = 0;
+      uint8_t tsch_sync_ie_offset;
+      /* Prepare the EB packet and schedule it to be sent */
+      if(tsch_packet_create_eb(&hdr_len, &tsch_sync_ie_offset) > 0) {
+        struct tsch_packet *p;
+        /* Enqueue EB packet, for a single transmission only */
+        if(!(p = tsch_queue_add_packet(&tsch_eb_address, 1, NULL, NULL))) {
+          LOG_ERR("! could not enqueue EB packet\n");
+        } else {
+          LOG_INFO("Enqueuing EB packet %u %u\n",
+                   packetbuf_totlen(), packetbuf_hdrlen());
+          p->tsch_sync_ie_offset = tsch_sync_ie_offset;
+          p->header_len = hdr_len;
         }
       }
     }
@@ -969,11 +1000,13 @@ tsch_init(void)
 
   rtimer_clock_t t;
 
+#if TSCH_DYNAMIC_TIMESLOT_TEMPLATE
   /* Check that the platform provides a TSCH timeslot timing template */
   if(TSCH_DEFAULT_TIMESLOT_TIMING == NULL) {
     LOG_ERR("! platform does not provide a timeslot timing template.\n");
     return;
   }
+#endif
 
   /* Check that the radio can correctly report its max supported payload */
   if(NETSTACK_RADIO.get_value(RADIO_CONST_MAX_PAYLOAD_LEN, &radio_max_payload_len) != RADIO_RESULT_OK) {
@@ -1025,17 +1058,17 @@ tsch_init(void)
   }
 
   /* Init TSCH sub-modules */
+#if TSCH_AUTOSELECT_TIME_SOURCE
+  nbr_table_register(eb_stats, NULL);
+#endif /* TSCH_AUTOSELECT_TIME_SOURCE */
   tsch_reset();
   tsch_queue_init();
   tsch_schedule_init();
   tsch_log_init();
   ringbufindex_init(&input_ringbuf, TSCH_MAX_INCOMING_PACKETS);
   ringbufindex_init(&dequeued_ringbuf, TSCH_DEQUEUED_ARRAY_SIZE);
-#if TSCH_AUTOSELECT_TIME_SOURCE
-  nbr_table_register(sync_stats, NULL);
-#endif /* TSCH_AUTOSELECT_TIME_SOURCE */
 
-  tsch_packet_seqno = random_rand();
+  mac_sequence_init();
   tsch_is_initialized = 1;
 
 #if TSCH_AUTOSTART
@@ -1049,6 +1082,7 @@ tsch_init(void)
 #endif
 
   tsch_stats_init();
+  tsch_roots_init();
 }
 /*---------------------------------------------------------------------------*/
 /* Function send for TSCH-MAC, puts the packet in packetbuf in the MAC queue */
@@ -1073,12 +1107,7 @@ send_packet(mac_callback_t sent, void *ptr)
 
   /* Ask for ACK if we are sending anything other than broadcast */
   if(!linkaddr_cmp(addr, &linkaddr_null)) {
-    /* PACKETBUF_ATTR_MAC_SEQNO cannot be zero, due to a pecuilarity
-           in framer-802154.c. */
-    if(++tsch_packet_seqno == 0) {
-      tsch_packet_seqno++;
-    }
-    packetbuf_set_attr(PACKETBUF_ATTR_MAC_SEQNO, tsch_packet_seqno);
+    mac_sequence_set_dsn();
     packetbuf_set_attr(PACKETBUF_ATTR_MAC_ACK, 1);
   } else {
     /* Broadcast packets shall be added to broadcast queue
@@ -1093,14 +1122,7 @@ send_packet(mac_callback_t sent, void *ptr)
   tsch_security_set_packetbuf_attr(FRAME802154_DATAFRAME);
 #endif /* LLSEC802154_ENABLED */
 
-#if !NETSTACK_CONF_BRIDGE_MODE
-  /*
-   * In the Contiki stack, the source address of a frame is set at the RDC
-   * layer. Since TSCH doesn't use any RDC protocol and bypasses the layer to
-   * transmit a frame, it should set the source address by itself.
-   */
   packetbuf_set_addr(PACKETBUF_ADDR_SENDER, &linkaddr_node_addr);
-#endif
 
   max_transmissions = packetbuf_attr(PACKETBUF_ATTR_MAX_MAC_TRANSMISSIONS);
   if(max_transmissions == 0) {
@@ -1113,22 +1135,28 @@ send_packet(mac_callback_t sent, void *ptr)
     ret = MAC_TX_ERR;
   } else {
     struct tsch_packet *p;
+    struct tsch_neighbor *n;
     /* Enqueue packet */
     p = tsch_queue_add_packet(addr, max_transmissions, sent, ptr);
+    n = tsch_queue_get_nbr(addr);
     if(p == NULL) {
       LOG_ERR("! can't send packet to ");
       LOG_ERR_LLADDR(addr);
-      LOG_ERR_(" with seqno %u, queue %u %u\n",
-          tsch_packet_seqno, tsch_queue_packet_count(addr), tsch_queue_global_packet_count());
-      ret = MAC_TX_ERR;
+      LOG_ERR_(" with seqno %u, queue %u/%u %u/%u\n",
+          packetbuf_attr(PACKETBUF_ATTR_MAC_SEQNO),
+          tsch_queue_nbr_packet_count(n),
+          TSCH_QUEUE_NUM_PER_NEIGHBOR, tsch_queue_global_packet_count(),
+          QUEUEBUF_NUM);
+      ret = MAC_TX_QUEUE_FULL;
     } else {
       p->header_len = hdr_len;
       LOG_INFO("send packet to ");
       LOG_INFO_LLADDR(addr);
-      LOG_INFO_(" with seqno %u, queue %u %u, len %u %u\n",
-             tsch_packet_seqno,
-             tsch_queue_packet_count(addr), tsch_queue_global_packet_count(),
-             p->header_len, queuebuf_datalen(p->qb));
+      LOG_INFO_(" with seqno %u, queue %u/%u %u/%u, len %u %u\n",
+             packetbuf_attr(PACKETBUF_ATTR_MAC_SEQNO),
+             tsch_queue_nbr_packet_count(n),
+             TSCH_QUEUE_NUM_PER_NEIGHBOR, tsch_queue_global_packet_count(),
+             QUEUEBUF_NUM, p->header_len, queuebuf_datalen(p->qb));
     }
   }
   if(ret != MAC_TX_DEFERRED) {
@@ -1181,8 +1209,10 @@ turn_on(void)
     tsch_is_started = 1;
     /* Process tx/rx callback and log messages whenever polled */
     process_start(&tsch_pending_events_process, NULL);
-    /* periodically send TSCH EBs */
-    process_start(&tsch_send_eb_process, NULL);
+    if(TSCH_EB_PERIOD > 0) {
+      /* periodically send TSCH EBs */
+      process_start(&tsch_send_eb_process, NULL);
+    }
     /* try to associate to a network or start one if setup as coordinator */
     process_start(&tsch_process, NULL);
     LOG_INFO("starting as %s\n", tsch_is_coordinator ? "coordinator": "node");
@@ -1204,6 +1234,11 @@ max_payload(void)
   int framer_hdrlen;
   radio_value_t max_radio_payload_len;
   radio_result_t res;
+
+  if(!tsch_is_associated) {
+    LOG_WARN("Cannot compute max payload size: not associated\n");
+    return 0;
+  }
 
   res = NETSTACK_RADIO.get_value(RADIO_CONST_MAX_PAYLOAD_LEN,
                                  &max_radio_payload_len);

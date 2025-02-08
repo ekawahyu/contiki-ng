@@ -90,6 +90,7 @@
 /** \name USB configuration
  *
  * The USB pullup is driven by PC0
+ * @{
  */
 #define USB_PULLUP_PORT          GPIO_C_NUM
 #define USB_PULLUP_PIN           0
@@ -179,16 +180,6 @@
 #define I2C_SCL_PIN              3
 #define I2C_SDA_PORT             GPIO_B_NUM
 #define I2C_SDA_PIN              4
-/** @} */
-/*---------------------------------------------------------------------------*/
-/**
- * \name OpenMote-CC2538 antenna switch configuration
- *
- * @{
- */
-#define ANTENNA_BSP_RADIO_BASE   GPIO_PORT_TO_BASE(GPIO_D_NUM)
-#define ANTENNA_BSP_RADIO_INT    GPIO_PIN_MASK(5)
-#define ANTENNA_BSP_RADIO_EXT    GPIO_PIN_MASK(4)
 /** @} */
 /*---------------------------------------------------------------------------*/
 /**

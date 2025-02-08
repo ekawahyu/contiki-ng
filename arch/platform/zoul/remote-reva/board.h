@@ -119,6 +119,7 @@
 /** \name USB configuration
  *
  * The USB pullup is enabled by an external resistor, not mapped to a GPIO
+ * @{
  */
 #ifdef USB_PULLUP_PORT
 #undef USB_PULLUP_PORT
@@ -359,7 +360,9 @@
  * either position.  Enabling the definition below forces to skip this check.
  * @{
  */
-#define REMOTE_DUAL_RF_ENABLED 0
+#ifndef REMOTE_DUAL_RF_ENABLED
+#define REMOTE_DUAL_RF_ENABLED  0
+#endif
 /** @} */
 /*---------------------------------------------------------------------------*/
 /**

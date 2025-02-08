@@ -51,12 +51,6 @@
 #include "net/routing/rpl-lite/rpl-const.h"
 #include "net/routing/rpl-lite/rpl-conf.h"
 #include "net/routing/rpl-lite/rpl-types.h"
-#include "net/routing/rpl-lite/rpl-icmp6.h"
-#include "net/routing/rpl-lite/rpl-dag.h"
-#include "net/routing/rpl-lite/rpl-dag-root.h"
-#include "net/routing/rpl-lite/rpl-neighbor.h"
-#include "net/routing/rpl-lite/rpl-ext-header.h"
-#include "net/routing/rpl-lite/rpl-timers.h"
 
 /********** Public symbols **********/
 
@@ -64,6 +58,15 @@
 extern rpl_instance_t curr_instance;
 /* The RPL multicast address (used for DIS and DIO) */
 extern uip_ipaddr_t rpl_multicast_addr;
+
+/********** More Includes **********/
+
+#include "net/routing/rpl-lite/rpl-icmp6.h"
+#include "net/routing/rpl-lite/rpl-dag.h"
+#include "net/routing/rpl-lite/rpl-dag-root.h"
+#include "net/routing/rpl-lite/rpl-neighbor.h"
+#include "net/routing/rpl-lite/rpl-ext-header.h"
+#include "net/routing/rpl-lite/rpl-timers.h"
 
 /********** Public functions **********/
 
@@ -147,6 +150,5 @@ void rpl_set_leaf_only(uint8_t value);
  * \return The value of the rpl_leaf_only flag
  */
 uint8_t rpl_get_leaf_only(void);
- /** @} */
 
 #endif /* RPL_H */

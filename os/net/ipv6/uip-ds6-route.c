@@ -53,25 +53,19 @@
 
 #if BUILD_WITH_ORCHESTRA
 
+/* A configurable function called after adding a new neighbor as next hop */
 #ifndef NETSTACK_CONF_ROUTING_NEIGHBOR_ADDED_CALLBACK
 #define NETSTACK_CONF_ROUTING_NEIGHBOR_ADDED_CALLBACK orchestra_callback_child_added
 #endif /* NETSTACK_CONF_ROUTING_NEIGHBOR_ADDED_CALLBACK */
+void NETSTACK_CONF_ROUTING_NEIGHBOR_ADDED_CALLBACK(const linkaddr_t *addr);
 
+/* A configurable function called after removing a next hop neighbor */
 #ifndef NETSTACK_CONF_ROUTING_NEIGHBOR_REMOVED_CALLBACK
 #define NETSTACK_CONF_ROUTING_NEIGHBOR_REMOVED_CALLBACK orchestra_callback_child_removed
 #endif /* NETSTACK_CONF_ROUTING_NEIGHBOR_REMOVED_CALLBACK */
+void NETSTACK_CONF_ROUTING_NEIGHBOR_REMOVED_CALLBACK(const linkaddr_t *addr);
 
 #endif /* BUILD_WITH_ORCHESTRA */
-
-/* A configurable function called after adding a new neighbor as next hop */
-#ifdef NETSTACK_CONF_ROUTING_NEIGHBOR_ADDED_CALLBACK
-void NETSTACK_CONF_ROUTING_NEIGHBOR_ADDED_CALLBACK(const linkaddr_t *addr);
-#endif /* NETSTACK_CONF_ROUTING_NEIGHBOR_ADDED_CALLBACK */
-
-/* A configurable function called after removing a next hop neighbor */
-#ifdef NETSTACK_CONF_ROUTING_NEIGHBOR_REMOVED_CALLBACK
-void NETSTACK_CONF_ROUTING_NEIGHBOR_REMOVED_CALLBACK(const linkaddr_t *addr);
-#endif /* NETSTACK_CONF_ROUTING_NEIGHBOR_REMOVED_CALLBACK */
 
 #if (UIP_MAX_ROUTES != 0)
 /* The nbr_routes holds a neighbor table to be able to maintain
@@ -184,6 +178,21 @@ uip_ds6_route_init(void)
 #if UIP_DS6_NOTIFICATIONS
   list_init(notificationlist);
 #endif
+}
+/*---------------------------------------------------------------------------*/
+int
+uip_ds6_route_count_nexthop_neighbors(void)
+{
+#if (UIP_MAX_ROUTES != 0)
+  struct uip_ds6_route_neighbor_routes *entry;
+  int count = 0;
+  for(entry = nbr_table_head(nbr_routes); entry != NULL; entry = nbr_table_next(nbr_routes, entry)) {
+    count++;
+  }
+  return count;
+#else /* (UIP_MAX_ROUTES != 0) */
+  return 0;
+#endif /* (UIP_MAX_ROUTES != 0) */
 }
 #if (UIP_MAX_ROUTES != 0)
 /*---------------------------------------------------------------------------*/
@@ -301,7 +310,7 @@ uip_ds6_route_lookup(const uip_ipaddr_t *addr)
     LOG_INFO_6ADDR(uip_ds6_route_nexthop(found_route));
     LOG_INFO_("\n");
   } else {
-    LOG_WARN("No route found\n");
+    LOG_INFO("No route found\n");
   }
 
   if(found_route != NULL && found_route != list_head(routelist)) {
@@ -516,7 +525,7 @@ uip_ds6_route_rm(uip_ds6_route_t *route)
       /* If this was the only route using this neighbor, remove the
          neighbor from the table - this implicitly unlocks nexthop */
 #if LOG_WITH_ANNOTATE
-      uip_ipaddr_t *nexthop = uip_ds6_route_nexthop(route);
+      const uip_ipaddr_t *nexthop = uip_ds6_route_nexthop(route);
       if(nexthop != NULL) {
         LOG_ANNOTATE("#L %u 0\n", nexthop->u8[sizeof(uip_ipaddr_t) - 1]);
       }
@@ -613,7 +622,6 @@ uip_ds6_defrt_add(const uip_ipaddr_t *ipaddr, unsigned long interval)
     return NULL;
   }
 
-  LOG_INFO("Add default\n");
   d = uip_ds6_defrt_lookup(ipaddr);
   if(d == NULL) {
     d = memb_alloc(&defaultroutermemb);
@@ -629,6 +637,9 @@ uip_ds6_defrt_add(const uip_ipaddr_t *ipaddr, unsigned long interval)
     }
 
     list_push(defaultrouterlist, d);
+  }
+  else {
+    LOG_INFO("Refreshing default\n");
   }
 
   uip_ipaddr_copy(&d->ipaddr, ipaddr);

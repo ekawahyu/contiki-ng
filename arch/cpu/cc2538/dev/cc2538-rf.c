@@ -49,6 +49,7 @@
 #include "dev/sys-ctrl.h"
 #include "dev/udma.h"
 #include "reg.h"
+#include "lib/iq-seeder.h"
 
 #include <string.h>
 /*---------------------------------------------------------------------------*/
@@ -253,6 +254,39 @@ get_rssi(void)
   }
 
   return rssi;
+}
+/*---------------------------------------------------------------------------*/
+/**
+ * \brief       Reads the current I/Q data of the received signal.
+ * \param value The least significant bit (LSB) of the I coordinate and the LSB
+ *              of the Q coordinate are concatenated and stored here.
+ *
+ * If not done already, this function first enables the RX mode and waits for
+ * the RSSI_VALID bit to go high. Hence, this function should only be called
+ * at start up or by the MAC protocol to avoid conflicts.
+ */
+static void
+get_iq_lsbs(radio_value_t *value)
+{
+  uint8_t was_off = 0;
+
+  /* If we are off, turn on first */
+  if((REG(RFCORE_XREG_FSMSTAT0) & RFCORE_XREG_FSMSTAT0_FSM_FFCTRL_STATE) == 0) {
+    was_off = 1;
+    on();
+  }
+
+  /* Wait on RSSI_VALID */
+  while((REG(RFCORE_XREG_RSSISTAT) & RFCORE_XREG_RSSISTAT_RSSI_VALID) == 0);
+
+  /* Read I/Q LSBs */
+  *value = REG(RFCORE_XREG_RFRND)
+      & (RFCORE_XREG_RFRND_IRND | RFCORE_XREG_RFRND_QRND);
+
+  /* If we were off, turn back off */
+  if(was_off) {
+    off();
+  }
 }
 /*---------------------------------------------------------------------------*/
 /* Returns the current CCA threshold in dBm */
@@ -565,7 +599,7 @@ init(void)
   set_channel(rf_channel);
 
   /* Enable SHR search */
-  set_shr_search(1);
+  set_shr_search(RADIO_SHR_SEARCH_EN);
 
   /* Acknowledge all RF Error interrupts */
   REG(RFCORE_XREG_RFERRM) = RFCORE_XREG_RFERRM_RFERRM;
@@ -594,6 +628,10 @@ init(void)
   }
 
   set_poll_mode(poll_mode);
+
+#if CSPRNG_ENABLED
+  iq_seeder_seed();
+#endif /* CSPRNG_ENABLED */
 
   process_start(&cc2538_rf_process, NULL);
 
@@ -914,6 +952,9 @@ get_value(radio_param_t param, radio_value_t *value)
   case RADIO_PARAM_LAST_LINK_QUALITY:
     *value = crc_corr & LQI_BIT_MASK;
     return RADIO_RESULT_OK;
+  case RADIO_PARAM_IQ_LSBS:
+    get_iq_lsbs(value);
+    return RADIO_RESULT_OK;
   case RADIO_CONST_CHANNEL_MIN:
     *value = CC2538_RF_CHANNEL_MIN;
     return RADIO_RESULT_OK;
@@ -1010,6 +1051,9 @@ set_value(radio_param_t param, radio_value_t value)
     set_cca_threshold(value);
     return RADIO_RESULT_OK;
   case RADIO_PARAM_SHR_SEARCH:
+    if((value != RADIO_SHR_SEARCH_EN) && (value != RADIO_SHR_SEARCH_DIS)) {
+      return RADIO_RESULT_INVALID_VALUE;
+    }
     set_shr_search(value);
     return RADIO_RESULT_OK;
   default:
@@ -1110,8 +1154,7 @@ PROCESS_THREAD(cc2538_rf_process, ev, data)
   PROCESS_BEGIN();
 
   while(1) {
-    /* Only if we are not in poll mode oder we are in poll mode and transceiver has to be reset */
-    PROCESS_YIELD_UNTIL((!poll_mode || (poll_mode && (rf_flags & RF_MUST_RESET))) && (ev == PROCESS_EVENT_POLL));
+    PROCESS_YIELD_UNTIL(ev == PROCESS_EVENT_POLL);
 
     if(!poll_mode) {
       packetbuf_clear();

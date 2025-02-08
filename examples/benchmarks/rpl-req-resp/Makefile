@@ -1,8 +1,8 @@
 CONTIKI_PROJECT = node
 all: $(CONTIKI_PROJECT)
 
-PLATFORMS_EXCLUDE = sky z1 nrf52dk native simplelink
-BOARDS_EXCLUDE = srf06/cc13x0 launchpad/cc1310 launchpad/cc1350 sensortag/cc2650 sensortag/cc1350
+PLATFORMS_EXCLUDE = sky z1 native
+BOARDS_EXCLUDE = launchpad/cc1350-4 launchpad/cc2640r2
 
 MODULES_REL += ../testbeds
 
@@ -27,10 +27,6 @@ else ifeq ($(CONFIG),CONFIG_TSCH_OPTIMS2)
 MAKE_MAC = MAKE_MAC_TSCH
 MODULES += $(CONTIKI_NG_SERVICES_DIR)/orchestra
 CFLAGS += -DCONFIG_OPTIMS=2
-else ifeq ($(CONFIG),CONFIG_TSCH_OPTIMS3)
-MAKE_MAC = MAKE_MAC_TSCH
-MODULES += $(CONTIKI_NG_SERVICES_DIR)/orchestra
-CFLAGS += -DCONFIG_OPTIMS=3
 endif
 
 include $(CONTIKI)/Makefile.include

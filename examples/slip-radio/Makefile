@@ -2,7 +2,9 @@ CONTIKI_PROJECT=slip-radio
 all: $(CONTIKI_PROJECT)
 
 # slip-radio is only intended for platforms with SLIP support
-PLATFORMS_EXCLUDE = native nrf52dk
+PLATFORMS_EXCLUDE = native
+
+PUTCHAR_FUN = slip_arch_writeb
 
 CONTIKI=../..
 include $(CONTIKI)/Makefile.identify-target

@@ -54,7 +54,13 @@
 
 typedef void (* mac_callback_t)(void *ptr, int status, int transmissions);
 
-void mac_call_sent_callback(mac_callback_t sent, void *ptr, int status, int num_tx);
+static inline void
+mac_call_sent_callback(mac_callback_t sent, void *ptr, int status, int num_tx)
+{
+  if(sent) {
+    sent(ptr, status, num_tx);
+  }
+}
 
 /**
  * The structure of a MAC protocol driver in Contiki.
@@ -104,6 +110,11 @@ enum {
      fatal error. The upper layer does not need to try again, as the
      error will be fatal then as well. */
   MAC_TX_ERR_FATAL,
+
+  /**< The MAC layer transmission could not be performed because of
+     insufficient queue space, failure to allocate a neighbor,
+     or insufficient packet memory space. The upper layer may try again later. */
+  MAC_TX_QUEUE_FULL,
 };
 
 #endif /* MAC_H_ */

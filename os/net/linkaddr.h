@@ -85,25 +85,10 @@ void linkaddr_copy(linkaddr_t *dest, const linkaddr_t *from);
  * \brief      Compare two link-layer addresses
  * \param addr1 The first address
  * \param addr2 The second address
- * \return     Non-zero if the addresses are the same, zero if they are different
- *
- *             This function compares two link-layer addresses and returns
- *             the result of the comparison. The function acts like
- *             the '==' operator and returns non-zero if the addresses
- *             are the same, and zero if the addresses are different.
- *
+ * \return     True if the addresses are the same, false if they are different
  */
-int linkaddr_cmp(const linkaddr_t *addr1, const linkaddr_t *addr2);
+bool linkaddr_cmp(const linkaddr_t *addr1, const linkaddr_t *addr2);
 
-
-/**
- * \brief      Set the address of the current node
- * \param addr The address
- *
- *             This function sets the link-layer address of the node.
- *
- */
-void linkaddr_set_node_addr(linkaddr_t *addr);
 
 /**
  * \brief      The link-layer address of the node
@@ -128,6 +113,18 @@ extern linkaddr_t linkaddr_node_addr;
  *
  */
 extern const linkaddr_t linkaddr_null;
+
+/**
+ * \brief      Set the address of the current node
+ * \param addr The address
+ *
+ *             This function sets the link-layer address of the node.
+ *
+ */
+static inline void linkaddr_set_node_addr(linkaddr_t *addr)
+{
+  linkaddr_copy(&linkaddr_node_addr, addr);
+}
 
 #endif /* LINKADDR_H_ */
 /** @} */

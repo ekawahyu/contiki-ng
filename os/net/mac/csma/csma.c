@@ -81,7 +81,7 @@ input_packet(void)
   if(packetbuf_datalen() == CSMA_ACK_LEN) {
     /* Ignore ack packets */
     LOG_DBG("ignored ack\n");
-  } else if(csma_security_parse_frame() < 0) {
+  } else if(CSMA_FRAMER.parse() < 0) {
     LOG_ERR("failed to parse %u\n", packetbuf_datalen());
   } else if(!linkaddr_cmp(packetbuf_addr(PACKETBUF_ADDR_RECEIVER),
                                          &linkaddr_node_addr) &&
@@ -142,6 +142,23 @@ init(void)
     LOG_ERR("! radio does not support getting RADIO_CONST_MAX_PAYLOAD_LEN. Abort init.\n");
     return;
   }
+
+#if CSMA_SEND_SOFT_ACK
+  radio_value_t radio_rx_mode;
+
+  /* Disable radio driver's autoack */
+  if(NETSTACK_RADIO.get_value(RADIO_PARAM_RX_MODE, &radio_rx_mode) != RADIO_RESULT_OK) {
+    LOG_WARN("radio does not support getting RADIO_PARAM_RX_MODE\n");
+  } else {
+    /* Unset autoack */
+    radio_rx_mode &= ~RADIO_RX_MODE_AUTOACK;
+    if(NETSTACK_RADIO.set_value(RADIO_PARAM_RX_MODE, radio_rx_mode) != RADIO_RESULT_OK) {
+      LOG_WARN("radio does not support setting RADIO_PARAM_RX_MODE\n");
+    }
+  }
+#endif
+
+  mac_sequence_init();
 
 #if LLSEC802154_USES_AUX_HEADER
 #ifdef CSMA_LLSEC_DEFAULT_KEY0

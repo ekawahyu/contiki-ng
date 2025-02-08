@@ -54,8 +54,6 @@
 #define EEPROM_CONF_SIZE				1024
 #endif
 
-#define w_memcpy memcpy
-
 #ifdef NETSTACK_CONF_H
 
 /* These header overrides the below default configuration */
@@ -98,22 +96,13 @@
 
 #endif /* NETSTACK_CONF_WITH_IPV6 */
 
-#define CC_CONF_REGISTER_ARGS          1
-#define CC_CONF_FUNCTION_POINTER_ARGS  1
 #define CC_CONF_VA_ARGS                1
-#define CC_CONF_INLINE inline
 
-/* These names are deprecated, use C99 names. */
 #include <inttypes.h>
-typedef uint8_t u8_t;
-typedef uint16_t u16_t;
-typedef uint32_t u32_t;
-typedef int32_t s32_t;
 
 typedef unsigned short uip_stats_t;
 
 #define CLOCK_CONF_SECOND 1000L
-typedef unsigned long clock_time_t;
 
 /* Use 64-bit rtimer (default in Contiki-NG is 32) */
 #define RTIMER_CONF_CLOCK_SIZE 8
@@ -127,15 +116,6 @@ typedef unsigned long clock_time_t;
 #define RADIO_DELAY_BEFORE_DETECT 0
 
 #define UIP_ARCH_IPCHKSUM        1
-
-#if MAC_CONF_WITH_TSCH
-/* A bug in cooja causes many EBs to be missed at scan. Increase EB
-   frequency to shorten the join process */
-#undef TSCH_CONF_EB_PERIOD
-#define TSCH_CONF_EB_PERIOD (4 * CLOCK_SECOND)
-#undef TSCH_CONF_MAX_EB_PERIOD
-#define TSCH_CONF_MAX_EB_PERIOD (4 * CLOCK_SECOND)
-#endif /* MAC_CONF_WITH_TSCH */
 
 #define CFS_CONF_OFFSET_TYPE	long
 
@@ -157,10 +137,15 @@ typedef unsigned long clock_time_t;
 #define COOJA_BTN_PIN                    3
 
 #define BUTTON_HAL_CONF_DEBOUNCE_DURATION 0
+
+/* Notify various examples that we have Buttons and LEDs */
+#define PLATFORM_HAS_BUTTON    1
+#define PLATFORM_SUPPORTS_BUTTON_HAL 1
+#define PLATFORM_HAS_LEDS    1
 /*---------------------------------------------------------------------------*/
 /* Virtual LED colors */
 #define LEDS_CONF_COUNT                  3
-#define LEDS_CONF_GREEEN                 1
+#define LEDS_CONF_GREEN                  1
 #define LEDS_CONF_RED                    2
 #define LEDS_CONF_YELLOW                 4
 /*---------------------------------------------------------------------------*/

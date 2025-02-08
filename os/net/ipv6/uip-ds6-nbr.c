@@ -64,6 +64,16 @@
 #define LOG_MODULE "IPv6 Nbr"
 #define LOG_LEVEL LOG_LEVEL_IPV6
 
+#if BUILD_WITH_ORCHESTRA
+
+/* A configurable function called after adding a new neighbor, or removing one */
+#ifndef NETSTACK_CONF_DS6_NEIGHBOR_UPDATED_CALLBACK
+#define NETSTACK_CONF_DS6_NEIGHBOR_UPDATED_CALLBACK orchestra_callback_neighbor_updated
+#endif /* NETSTACK_CONF_DS6_NEIGHBOR_UPDATED_CALLBACK */
+void NETSTACK_CONF_DS6_NEIGHBOR_UPDATED_CALLBACK(const linkaddr_t *, uint8_t is_added);
+
+#endif /* BUILD_WITH_ORCHESTRA */
+
 #if UIP_DS6_NBR_MULTI_IPV6_ADDRS
 /**
  * Add nbr to the list in nbr_entry. In other words, this function associates an
@@ -181,6 +191,9 @@ uip_ds6_nbr_add(const uip_ipaddr_t *ipaddr, const uip_lladdr_t *lladdr,
 #endif /* UIP_DS6_NBR_MULTI_IPV6_ADDRS */
 
   if(nbr) {
+#ifdef NETSTACK_CONF_DS6_NEIGHBOR_UPDATED_CALLBACK
+    NETSTACK_CONF_DS6_NEIGHBOR_UPDATED_CALLBACK((const linkaddr_t *)lladdr, 1);
+#endif /* NETSTACK_CONF_DS6_NEIGHBOR_ADDED_CALLBACK */
     uip_ipaddr_copy(&nbr->ipaddr, ipaddr);
 #if UIP_ND6_SEND_RA || !UIP_CONF_ROUTER
     nbr->isrouter = isrouter;
@@ -293,23 +306,40 @@ callback_nbr_entry_removal(uip_ds6_nbr_entry_t *nbr_entry)
 int
 uip_ds6_nbr_rm(uip_ds6_nbr_t *nbr)
 {
-#if UIP_DS6_NBR_MULTI_IPV6_ADDRS
+  int ret;
   if(nbr == NULL) {
     return 0;
-  } else {
-    free_uip_ds6_nbr(nbr);
-    return 1;
   }
+
+#ifdef NETSTACK_CONF_DS6_NEIGHBOR_UPDATED_CALLBACK
+  linkaddr_t lladdr = {0};
+
+  const uip_lladdr_t *plladdr = uip_ds6_nbr_get_ll(nbr);
+  if(plladdr != NULL) {
+    memcpy(&lladdr, plladdr, sizeof(lladdr));
+  }
+#endif /* NETSTACK_CONF_DS6_NEIGHBOR_UPDATED_CALLBACK */
+
+#if UIP_DS6_NBR_MULTI_IPV6_ADDRS
+
+  free_uip_ds6_nbr(nbr);
+  ret = 1;
+
 #else /* UIP_DS6_NBR_MULTI_IPV6_ADDRS */
-  if(nbr != NULL) {
+
 #if UIP_CONF_IPV6_QUEUE_PKT
-    uip_packetqueue_free(&nbr->packethandle);
+  uip_packetqueue_free(&nbr->packethandle);
 #endif /* UIP_CONF_IPV6_QUEUE_PKT */
-    NETSTACK_ROUTING.neighbor_state_changed(nbr);
-    return nbr_table_remove(ds6_neighbors, nbr);
-  }
-  return 0;
+
+  NETSTACK_ROUTING.neighbor_state_changed(nbr);
+  ret = nbr_table_remove(ds6_neighbors, nbr);
 #endif /* UIP_DS6_NBR_MULTI_IPV6_ADDRS */
+
+#ifdef NETSTACK_CONF_DS6_NEIGHBOR_UPDATED_CALLBACK
+  NETSTACK_CONF_DS6_NEIGHBOR_UPDATED_CALLBACK(&lladdr, 0);
+#endif /* NETSTACK_CONF_DS6_NEIGHBOR_ADDED_CALLBACK */
+
+  return ret;
 }
 
 /*---------------------------------------------------------------------------*/
@@ -666,25 +696,6 @@ uip_ds6_nbr_refresh_reachable_state(const uip_ipaddr_t *ipaddr)
     nbr->nscount = 0;
     stimer_set(&nbr->reachable, UIP_ND6_REACHABLE_TIME / 1000);
   }
-}
-/*---------------------------------------------------------------------------*/
-uip_ds6_nbr_t *
-uip_ds6_get_least_lifetime_neighbor(void)
-{
-  uip_ds6_nbr_t *nbr = uip_ds6_nbr_head();
-  uip_ds6_nbr_t *nbr_expiring = NULL;
-  while(nbr != NULL) {
-    if(nbr_expiring != NULL) {
-      clock_time_t curr = stimer_remaining(&nbr->reachable);
-      if(curr < stimer_remaining(&nbr->reachable)) {
-        nbr_expiring = nbr;
-      }
-    } else {
-      nbr_expiring = nbr;
-    }
-    nbr = uip_ds6_nbr_next(nbr);
-  }
-  return nbr_expiring;
 }
 #endif /* UIP_ND6_SEND_NS */
 /*---------------------------------------------------------------------------*/

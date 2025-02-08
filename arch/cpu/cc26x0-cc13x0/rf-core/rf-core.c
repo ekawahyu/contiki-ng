@@ -128,8 +128,8 @@ volatile uint32_t rf_core_last_packet_timestamp = 0;
 /* Are we currently in poll mode? */
 uint8_t rf_core_poll_mode = 0;
 /*---------------------------------------------------------------------------*/
-/* Buffer full flag */
-volatile bool rf_core_rx_is_full = false;
+/* Status of the last command sent */
+volatile uint32_t last_cmd_status;
 /*---------------------------------------------------------------------------*/
 PROCESS(rf_core_process, "CC13xx / CC26xx RF driver");
 /*---------------------------------------------------------------------------*/
@@ -156,6 +156,10 @@ rf_core_send_cmd(uint32_t cmd, uint32_t *status)
   uint32_t timeout_count = 0;
   bool interrupts_disabled;
   bool is_radio_op = false;
+
+  /* reset the status variables to invalid values */
+  last_cmd_status = (uint32_t)-1;
+  *status = last_cmd_status;
 
   /*
    * If cmd is 4-byte aligned, then it's either a radio OP or an immediate
@@ -195,15 +199,16 @@ rf_core_send_cmd(uint32_t cmd, uint32_t *status)
 
   HWREG(RFC_DBELL_BASE + RFC_DBELL_O_CMDR) = cmd;
   do {
-    *status = HWREG(RFC_DBELL_BASE + RFC_DBELL_O_CMDSTA);
+    last_cmd_status = HWREG(RFC_DBELL_BASE + RFC_DBELL_O_CMDSTA);
     if(++timeout_count > 50000) {
       PRINTF("rf_core_send_cmd: 0x%08lx Timeout\n", cmd);
       if(!interrupts_disabled) {
         ti_lib_int_master_enable();
       }
+      *status = last_cmd_status;
       return RF_CORE_CMD_ERROR;
     }
-  } while((*status & RF_CORE_CMDSTA_RESULT_MASK) == RF_CORE_CMDSTA_PENDING);
+  } while((last_cmd_status & RF_CORE_CMDSTA_RESULT_MASK) == RF_CORE_CMDSTA_PENDING);
 
   if(!interrupts_disabled) {
     ti_lib_int_master_enable();
@@ -213,7 +218,8 @@ rf_core_send_cmd(uint32_t cmd, uint32_t *status)
    * If we reach here the command is no longer pending. It is either completed
    * successfully or with error
    */
-  return (*status & RF_CORE_CMDSTA_RESULT_MASK) == RF_CORE_CMDSTA_DONE;
+  *status = last_cmd_status;
+  return (last_cmd_status & RF_CORE_CMDSTA_RESULT_MASK) == RF_CORE_CMDSTA_DONE;
 }
 /*---------------------------------------------------------------------------*/
 uint_fast8_t
@@ -233,8 +239,15 @@ rf_core_wait_cmd_done(void *cmd)
   } while((command->status & RF_CORE_RADIO_OP_MASKED_STATUS)
           != RF_CORE_RADIO_OP_MASKED_STATUS_DONE);
 
+  last_cmd_status = command->status;
   return (command->status & RF_CORE_RADIO_OP_MASKED_STATUS)
          == RF_CORE_RADIO_OP_STATUS_DONE_OK;
+}
+/*---------------------------------------------------------------------------*/
+uint32_t
+rf_core_cmd_status(void)
+{
+  return last_cmd_status;
 }
 /*---------------------------------------------------------------------------*/
 static int
@@ -731,8 +744,6 @@ cc26xx_rf_cpe1_isr(void)
 
   if(HWREG(RFC_DBELL_NONBUF_BASE + RFC_DBELL_O_RFCPEIFG) & IRQ_RX_BUF_FULL) {
     PRINTF("\nRF: BUF_FULL\n\n");
-    /* set a flag that the buffer is full*/
-    rf_core_rx_is_full = true;
     /* make sure read_frame() will be called to make space in RX buffer */
     process_poll(&rf_core_process);
     /* Clear the IRQ_RX_BUF_FULL interrupt flag by writing zero to bit */
@@ -747,7 +758,7 @@ void
 cc26xx_rf_cpe0_isr(void)
 {
   if(!rf_core_is_accessible()) {
-    printf("RF ISR called but RF not ready... PANIC!!\n");
+    PRINTF("RF ISR called but RF not ready... PANIC!!\n");
     if(rf_core_power_up() != RF_CORE_CMD_OK) {
       PRINTF("rf_core_power_up() failed\n");
       return;

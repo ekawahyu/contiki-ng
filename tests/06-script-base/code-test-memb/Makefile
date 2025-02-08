@@ -1,9 +1,8 @@
 CONTIKI = ../../..
 
-CC ?= gcc
+CC = gcc
 CFLAGS += -Wall -g
 CFLAGS += -I.
-CFLAGS += -I/user/local/include
 CFLAGS += -I$(CONTIKI)/os
 
 MEMB_C = $(CONTIKI)/os/lib/memb.c

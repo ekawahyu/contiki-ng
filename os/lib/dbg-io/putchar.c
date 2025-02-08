@@ -38,7 +38,6 @@
 int
 putchar(int c)
 {
-  dbg_putchar(c);
-  return c;
+  return dbg_putchar(c);
 }
 /*---------------------------------------------------------------------------*/

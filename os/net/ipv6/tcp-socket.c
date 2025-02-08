@@ -40,6 +40,8 @@
 
 #include "tcp-socket.h"
 
+#if UIP_TCP
+
 #include <string.h>
 
 static void relisten(struct tcp_socket *s);
@@ -222,7 +224,6 @@ appcall(void *state)
     s->c = NULL;
     tcp_markconn(uip_conn, NULL);
     s->c = NULL;
-    /*call_event(s, TCP_SOCKET_CLOSED);*/
     relisten(s);
   }
 
@@ -407,3 +408,4 @@ tcp_socket_queuelen(struct tcp_socket *s)
   return s->output_data_len;
 }
 /*---------------------------------------------------------------------------*/
+#endif /* UIP_TCP */

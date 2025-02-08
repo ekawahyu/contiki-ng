@@ -320,8 +320,6 @@ typedef struct rf_core_primary_mode_s {
 /* Make the main driver process visible to mode drivers */
 PROCESS_NAME(rf_core_process);
 /*---------------------------------------------------------------------------*/
-/* Buffer full flag */
-extern volatile bool rf_core_rx_is_full;
 /*---------------------------------------------------------------------------*/
 /* RSSI of the last read frame */
 extern volatile int8_t rf_core_last_rssi;
@@ -380,6 +378,11 @@ uint_fast8_t rf_core_send_cmd(uint32_t cmd, uint32_t *status);
  *         status _DONE_xxx (e.g. RF_CORE_RADIO_OP_STATUS_DONE_TIMEOUT)
  */
 uint_fast8_t rf_core_wait_cmd_done(void *cmd);
+
+/**
+ * \brief Get the status of the last issued radio command
+ */
+uint32_t rf_core_cmd_status(void);
 
 /**
  * \brief Turn on power to the RFC and boot it.

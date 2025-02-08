@@ -41,8 +41,8 @@ frequency hopping for enhanced reliability.
 *	Main API declarations for TSCH.
 */
 
-#ifndef __TSCH_H__
-#define __TSCH_H__
+#ifndef TSCH_H_
+#define TSCH_H_
 
 /********** Includes **********/
 
@@ -61,6 +61,7 @@ frequency hopping for enhanced reliability.
 #include "net/mac/tsch/tsch-security.h"
 #include "net/mac/tsch/tsch-schedule.h"
 #include "net/mac/tsch/tsch-stats.h"
+#include "net/mac/tsch/tsch-roots.h"
 #if UIP_CONF_IPV6_RPL
 #include "net/mac/tsch/tsch-rpl.h"
 #endif /* UIP_CONF_IPV6_RPL */
@@ -104,26 +105,30 @@ frequency hopping for enhanced reliability.
 #define TSCH_CALLBACK_PACKET_READY orchestra_callback_packet_ready
 #endif /* TSCH_CALLBACK_PACKET_READY */
 
+#ifndef TSCH_CALLBACK_ROOT_NODE_UPDATED
+#define TSCH_CALLBACK_ROOT_NODE_UPDATED orchestra_callback_root_node_updated
+#endif /* TSCH_CALLBACK_ROOT_NODE_UPDATED */
+
 #endif /* BUILD_WITH_ORCHESTRA */
 
 /* Called by TSCH when joining a network */
 #ifdef TSCH_CALLBACK_JOINING_NETWORK
-void TSCH_CALLBACK_JOINING_NETWORK();
+void TSCH_CALLBACK_JOINING_NETWORK(void);
 #endif
 
 /* Called by TSCH when leaving a network */
 #ifdef TSCH_CALLBACK_LEAVING_NETWORK
-void TSCH_CALLBACK_LEAVING_NETWORK();
+void TSCH_CALLBACK_LEAVING_NETWORK(void);
 #endif
 
 /* Called by TSCH after sending a keep-alive */
 #ifdef TSCH_CALLBACK_KA_SENT
-void TSCH_CALLBACK_KA_SENT();
+void TSCH_CALLBACK_KA_SENT(int status, int transmissions);
 #endif
 
 /* Called by TSCH before sending a EB */
 #ifdef TSCH_RPL_CHECK_DODAG_JOINED
-int TSCH_RPL_CHECK_DODAG_JOINED();
+int TSCH_RPL_CHECK_DODAG_JOINED(void);
 #endif
 
 /* Called by TSCH form interrupt after receiving a frame, enabled upper-layer to decide
@@ -143,6 +148,12 @@ void TSCH_CALLBACK_NEW_TIME_SOURCE(const struct tsch_neighbor *old, const struct
 int TSCH_CALLBACK_PACKET_READY(void);
 #endif
 
+/* Called when a new root node, including the local node, is detected to be added or removed */ 
+#ifdef TSCH_CALLBACK_ROOT_NODE_UPDATED
+void TSCH_CALLBACK_ROOT_NODE_UPDATED(const linkaddr_t *, uint8_t is_added);
+#endif /* TSCH_CALLBACK_ROOT_NODE_UPDATED */
+
+
 /***** External Variables *****/
 
 /* Are we coordinator of the TSCH network? */
@@ -161,8 +172,9 @@ extern const linkaddr_t tsch_eb_address;
 extern struct tsch_asn_t tsch_current_asn;
 extern uint8_t tsch_join_priority;
 extern struct tsch_link *current_link;
-/* If we are inside a slot, this tells the current channel */
+/* If we are inside a slot, these tell the current channel and channel offset */
 extern uint8_t tsch_current_channel;
+extern uint8_t tsch_current_channel_offset;
 /* TSCH channel hopping sequence */
 extern uint8_t tsch_hopping_sequence[TSCH_HOPPING_SEQUENCE_MAX_LEN];
 extern struct tsch_asn_divisor_t tsch_hopping_sequence_length;
@@ -198,6 +210,11 @@ void tsch_set_join_priority(uint8_t jp);
  * not be set to exceed TSCH_MAX_EB_PERIOD. Set to 0 to stop sending EBs.
  * Actual transmissions are jittered, spaced by a random number within
  * [period*0.75, period[
+ * If RPL is used, the period will be automatically reset by RPL
+ * equal to the DIO period whenever the DIO period changes.
+ * Hence, calling `tsch_set_eb_period(0)` is NOT sufficient to disable sending EB!
+ * To do that, either configure the node in RPL leaf mode, or
+ * use static config for TSCH (`define TSCH_CONF_EB_PERIOD 0`).
  *
  * \param period The period in Clock ticks.
  */
@@ -245,5 +262,5 @@ uint64_t tsch_get_network_uptime_ticks(void);
   */
 void tsch_disassociate(void);
 
-#endif /* __TSCH_H__ */
+#endif /* TSCH_H_ */
 /** @} */

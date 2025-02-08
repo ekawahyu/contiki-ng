@@ -37,8 +37,8 @@
  *	TSCH per-slot logging
 */
 
-#ifndef __TSCH_LOG_H__
-#define __TSCH_LOG_H__
+#ifndef TSCH_LOG_H_
+#define TSCH_LOG_H_
 
 /********** Includes **********/
 
@@ -82,6 +82,7 @@ struct tsch_log_t {
   struct tsch_link *link;
   uint8_t burst_count;
   uint8_t channel;
+  uint8_t channel_offset;
   union {
     char message[48];
     struct {
@@ -148,5 +149,5 @@ void tsch_log_stop(void);
 
 #endif /* (TSCH_LOG_PER_SLOT == 0) */
 
-#endif /* __TSCH_LOG_H__ */
+#endif /* TSCH_LOG_H_ */
 /** @} */

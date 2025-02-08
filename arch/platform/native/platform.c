@@ -48,10 +48,6 @@
 #include <sys/select.h>
 #include <errno.h>
 
-#ifdef __CYGWIN__
-#include "net/wpcap-drv.h"
-#endif /* __CYGWIN__ */
-
 #include "contiki.h"
 #include "net/netstack.h"
 
@@ -67,6 +63,15 @@
 #if NETSTACK_CONF_WITH_IPV6
 #include "net/ipv6/uip-ds6.h"
 #endif /* NETSTACK_CONF_WITH_IPV6 */
+
+#include "lib/assert.h"
+#include "lib/csprng.h"
+#ifdef __APPLE__
+#include <Security/Security.h>
+#include <Security/SecRandom.h>
+#else /* __APPLE__ */
+#include <sys/random.h>
+#endif /* __APPLE__ */
 
 /* Log configuration */
 #include "sys/log.h"
@@ -160,14 +165,13 @@ stdin_set_fd(fd_set *rset, fd_set *wset)
   FD_SET(STDIN_FILENO, rset);
   return 1;
 }
-
 static int (*input_handler)(unsigned char c);
 
-void native_uart_set_input(int (*input)(unsigned char c)) {
+void
+native_uart_set_input(int (*input)(unsigned char c))
+{
   input_handler = input;
 }
-
-
 static void
 stdin_handle_fd(fd_set *rset, fd_set *wset)
 {
@@ -226,36 +230,21 @@ set_global_address(void)
 }
 #endif
 /*---------------------------------------------------------------------------*/
-int contiki_argc = 0;
-char **contiki_argv;
-/*---------------------------------------------------------------------------*/
-void
-platform_process_args(int argc, char**argv)
-{
-  /* crappy way of remembering and accessing argc/v */
-  contiki_argc = argc;
-  contiki_argv = argv;
-
-  /* native under windows is hardcoded to use the first one or two args */
-  /* for wpcap configuration so this needs to be "removed" from         */
-  /* contiki_args (used by the native-border-router) */
-#ifdef __CYGWIN__
-  contiki_argc--;
-  contiki_argv++;
-#ifdef UIP_FALLBACK_INTERFACE
-  contiki_argc--;
-  contiki_argv++;
-#endif
-#endif
-}
-/*---------------------------------------------------------------------------*/
 void
 platform_init_stage_one()
 {
   gpio_hal_init();
   button_hal_init();
   leds_init();
-  return;
+  struct csprng_seed seed;
+#ifdef __APPLE__
+  if(SecRandomCopyBytes(kSecRandomDefault, CSPRNG_SEED_LEN, seed.u8)
+      == errSecSuccess) {
+#else /* __APPLE__ */
+  if(getrandom(seed.u8, CSPRNG_SEED_LEN, GRND_RANDOM) == CSPRNG_SEED_LEN) {
+#endif /* __APPLE__ */
+    csprng_feed(&seed);
+  }
 }
 /*---------------------------------------------------------------------------*/
 void
@@ -264,22 +253,18 @@ platform_init_stage_two()
   set_lladdr();
   serial_line_init();
 
-  if (NULL == input_handler) {
+#if SELECT_STDIN
+  if(NULL == input_handler) {
     native_uart_set_input(serial_line_input_byte);
   }
-
+#endif
 }
 /*---------------------------------------------------------------------------*/
 void
 platform_init_stage_three()
 {
 #if NETSTACK_CONF_WITH_IPV6
-#ifdef __CYGWIN__
-  process_start(&wpcap_process, NULL);
-#endif
-
   set_global_address();
-
 #endif /* NETSTACK_CONF_WITH_IPV6 */
 
   /* Make standard output unbuffered. */
@@ -302,8 +287,8 @@ platform_main_loop()
 
     retval = process_run();
 
-    tv.tv_sec = 0;
-    tv.tv_usec = retval ? 1 : SELECT_TIMEOUT;
+    tv.tv_sec = retval ? 0 : SELECT_TIMEOUT / 1000;
+    tv.tv_usec = retval ? 1 : (SELECT_TIMEOUT * 1000) % 1000000;
 
     FD_ZERO(&fdr);
     FD_ZERO(&fdw);
@@ -330,20 +315,6 @@ platform_main_loop()
 
     etimer_request_poll();
   }
-
-  return;
-}
-/*---------------------------------------------------------------------------*/
-void
-log_message(char *m1, char *m2)
-{
-  fprintf(stderr, "%s%s\n", m1, m2);
-}
-/*---------------------------------------------------------------------------*/
-void
-uip_log(char *m)
-{
-  fprintf(stderr, "%s\n", m);
 }
 /*---------------------------------------------------------------------------*/
 /** @} */

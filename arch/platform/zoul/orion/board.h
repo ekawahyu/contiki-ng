@@ -84,6 +84,7 @@
 /** \name USB configuration
  *
  * The USB pullup for D+ is not included in this platform
+ * @{
  */
 #ifdef USB_PULLUP_PORT
 #undef USB_PULLUP_PORT
@@ -225,7 +226,9 @@
  * Enables support for dual band operation (both CC1200 and 2.4GHz enabled).
  * @{
  */
-#define REMOTE_DUAL_RF_ENABLED 1
+#ifndef REMOTE_DUAL_RF_ENABLED
+#define REMOTE_DUAL_RF_ENABLED  1
+#endif
 /** @} */
 /*---------------------------------------------------------------------------*/
 /**
