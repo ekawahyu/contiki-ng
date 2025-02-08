@@ -128,7 +128,7 @@ request(void)
   return LPM_MODE_MAX_SUPPORTED;
 }
 /*---------------------------------------------------------------------------*/
-LPM_MODULE(rng_module, request, NULL, NULL, LPM_DOMAIN_NONE);
+LPM_MODULE(rng_module, request, NULL, NULL, LPM_DOMAIN_NONE, "trng");
 /*---------------------------------------------------------------------------*/
 static uint64_t
 read_number(void)

@@ -55,6 +55,8 @@
 #include <stdint.h>
 #include <string.h>
 #include <stdbool.h>
+
+void fade(leds_mask_t l);
 /*---------------------------------------------------------------------------*/
 LIST(modules_list);
 /*---------------------------------------------------------------------------*/
@@ -306,7 +308,7 @@ setup_sleep_mode(void)
   if(LPM_MODE_MAX_SUPPORTED == LPM_MODE_AWAKE || process_nevents()) {
     return LPM_MODE_AWAKE;
   }
-
+  
   /* Collect max allowed PM permission from interested modules */
   for(module = list_head(modules_list); module != NULL;
       module = module->next) {
@@ -314,6 +316,7 @@ setup_sleep_mode(void)
       uint8_t module_pm = module->request_max_pm();
       if(module_pm < max_pm) {
         max_pm = module_pm;
+        printf("%s\n", module->name);
       }
     }
   }
@@ -533,8 +536,10 @@ lpm_drop()
 
   /* Drop */
   if(max_pm == LPM_MODE_SLEEP) {
+    fade(LEDS_GREEN);
     lpm_sleep();
   } else if(max_pm == LPM_MODE_DEEP_SLEEP) {
+    fade(LEDS_ORANGE);
     deep_sleep();
   }
 
