@@ -1,0 +1,7 @@
+{
+    "files.associations": {
+        "lpm.h": "c",
+        "button-hal.h": "c",
+        "netstack.h": "c"
+    }
+}
