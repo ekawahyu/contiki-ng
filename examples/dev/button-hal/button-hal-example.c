@@ -31,6 +31,8 @@
 /*---------------------------------------------------------------------------*/
 #include "contiki.h"
 #include "dev/button-hal.h"
+#include "net/netstack.h"
+#include "lpm.h"
 
 #include <stdio.h>
 /*---------------------------------------------------------------------------*/
@@ -74,9 +76,17 @@ PROCESS_THREAD(button_hal_example, ev, data)
       printf("Periodic event, %u seconds (%s)\n", btn->press_duration_seconds,
              BUTTON_HAL_GET_DESCRIPTION(btn));
 
-      if(btn->press_duration_seconds > 5) {
-        printf("%s pressed for more than 5 secs. Do custom action\n",
+      if(btn->press_duration_seconds > 3) {
+        printf("%s pressed for more than 3 secs. Do custom action\n",
                BUTTON_HAL_GET_DESCRIPTION(btn));
+        if(btn->unique_id == BOARD_BUTTON_HAL_INDEX_KEY_LEFT) {
+          printf("rf power down\n");
+          NETSTACK_RADIO.off();
+        }
+        if(btn->unique_id == BOARD_BUTTON_HAL_INDEX_KEY_RIGHT) {
+          printf("rf power up\n");
+          NETSTACK_RADIO.on();
+        }
       }
     }
   }
